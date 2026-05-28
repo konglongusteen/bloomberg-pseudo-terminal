@@ -1,1 +1,72 @@
-Dependency directoriesnode_modules/jspm_packages/Local Environment Secrets (CRITICAL: Do not push to GitHub).env.env.local.env.development.local.env.test.local.env.production.localDatabase backups and local files*.db*.sqliteuser_database.jsonOperating System files.DS_StoreThumbs.db
+==========================================
+
+Private Credentials & Secrets (CRITICAL)
+
+==========================================
+
+Never commit your local keys to GitHub.
+
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+==========================================
+
+Local SQLite/JSON Database Backups
+
+==========================================
+
+Excludes local transaction logs and simulated user credential backups.
+
+user_database.json
+*.db
+*.sqlite
+*.sqlite3
+
+==========================================
+
+Dependency & Build Folders
+
+==========================================
+
+Prevents thousands of massive, downloadable node modules from clogging your Git tree.
+
+node_modules/
+jspm_packages/
+web_modules/
+.npm/
+dist/
+build/
+
+==========================================
+
+Log Files
+
+==========================================
+
+Keeps local debug logs and error logs out of version control.
+
+logs/
+.log
+npm-debug.log
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+==========================================
+
+System Specific Files & Cache
+
+==========================================
+
+Filters OS garbage files.
+
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
