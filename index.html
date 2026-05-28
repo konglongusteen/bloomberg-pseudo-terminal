@@ -1,16 +1,14 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Bloomberg Terminal - Secure Client Core</title>
+    <title>Bloomberg Terminal - Live Data</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Montserrat:wght=100..900&family=JetBrains+Mono:wght=100..800&display=swap"
-        rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@100..900&family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
@@ -21,7 +19,7 @@
                         bbPanel: '#0a0a0a',
                         bbBorder: '#282828',
                         bbActiveBorder: '#dfb257',
-                        bbAmber: '#dfb257', /* Professional mellow-gold accent */
+                        bbAmber: '#dfb257',
                         bbGreen: '#00ff00',
                         bbRed: '#ff3333',
                         bbCyan: '#00ffff',
@@ -37,38 +35,19 @@
         }
     </script>
     <style>
-        /* Custom scrollbar behaviors for institutional high-density appearance */
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: #000000;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: #222222;
-            border-radius: 3px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: #dfb257;
-        }
-
-        .blinking-cursor::after {
-            content: "█";
-            animation: blink 1s steps(2, start) infinite;
-        }
-
-        @keyframes blink {
-            to {
-                visibility: hidden;
-            }
-        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #000000; }
+        ::-webkit-scrollbar-thumb { background: #222222; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #dfb257; }
+        @keyframes tick-up { 0% { background-color: rgba(0, 255, 0, 0.25); } 100% { background-color: transparent; } }
+        @keyframes tick-down { 0% { background-color: rgba(255, 51, 51, 0.25); } 100% { background-color: transparent; } }
+        .tick-up { animation: tick-up 0.8s ease-out; }
+        .tick-down { animation: tick-down 0.8s ease-out; }
+        #chart-container { width: 100%; height: 100%; min-height: 400px; display: flex; flex-direction: column; }
+        .watchlist-placeholder { color: #666; text-align: center; padding: 20px; }
+        .chart-error { color: #ff8888; text-align: center; padding: 20px; font-family: monospace; background: rgba(255,0,0,0.1); margin: 10px; border-radius: 4px; }
     </style>
 </head>
-
 <body class="bg-bbBg text-[#e2e2e2] font-mono h-full overflow-hidden select-none flex flex-col">
 
     <header class="bg-bbHeader border-b border-bbBorder px-4 py-1.5 flex items-center justify-between text-xs shrink-0">
@@ -76,791 +55,605 @@
             <span class="text-bbAmber font-bold tracking-wider text-sm">BLOOMBERG TERMINAL</span>
             <div class="hidden md:flex space-x-4 text-bbGray">
                 <div>SYS: <span class="text-bbGreen">ONLINE</span></div>
-                <div>SECURITY: <span id="security-badge" class="text-bbCyan">DUAL_FAILOVER</span></div>
+                <div>SECURITY: <span class="text-bbCyan">SECURE_CLIENT</span></div>
                 <div>STATION: <span class="text-[#ffffff]">BPT-X64</span></div>
             </div>
         </div>
         <div class="flex items-center space-x-4">
-            <div id="terminal-clock" class="text-bbAmber font-bold">--:--:-- UTC</div>
-            <button id="logout-btn"
-                class="hidden bg-[#1a1a1a] border border-bbBorder px-2 py-0.5 text-bbRed hover:bg-bbRed hover:text-white transition duration-150 rounded">
-                LOGOUT
-            </button>
+            <div id="terminal-mode-badge" class="text-bbAmber font-bold uppercase tracking-wider font-sans bg-amber-950/40 border border-bbAmber/30 px-2.5 py-0.5 rounded-sm">LIVE DATA</div>
+            <div id="terminal-clock" class="text-bbAmber font-bold font-mono">--:--:-- UTC</div>
+            <button onclick="toggleHelpModal()" class="bg-[#1a1a1a] border border-bbBorder px-2 py-0.5 text-bbAmber hover:bg-bbAmber hover:text-black transition duration-150 rounded font-sans">HELP [F1]</button>
         </div>
     </header>
 
     <main class="flex-1 relative overflow-hidden">
-
-        <div id="auth-gateway"
-            class="absolute inset-0 bg-bbBg flex items-center justify-center p-4 z-50 transition-opacity duration-300">
-            <div class="w-full max-w-md border border-bbBorder bg-bbPanel p-6 shadow-2xl relative">
-                <div class="absolute top-0 left-0 w-16 h-0.5 bg-bbAmber"></div>
-                <div class="absolute top-0 left-0 h-16 w-0.5 bg-bbAmber"></div>
-
-                <div class="text-center mb-6">
-                    <h2 class="text-bbAmber font-bold text-lg tracking-wider">TERMINAL ACCESS SECURITY</h2>
-                    <p class="text-xs text-bbGray mt-1">SECURE TRANSMISSION LAYER ENCRYPTED VIA CLIENT PROXY</p>
-                </div>
-
-                <div id="auth-alert" class="hidden mb-4 p-2.5 text-xs bg-red-950/50 border border-bbRed text-red-400">
-                </div>
-
-                <div class="flex border-b border-bbBorder mb-4 text-xs">
-                    <button id="tab-login"
-                        class="flex-1 py-2 text-center text-bbAmber border-b-2 border-bbAmber font-bold">1. SECURE
-                        LOGIN</button>
-                    <button id="tab-register" class="flex-1 py-2 text-center text-bbGray hover:text-white transition">2.
-                        USER PROVISIONING</button>
-                </div>
-
-                <form id="auth-form" class="space-y-4 text-xs" autocomplete="off">
-                    <div>
-                        <label class="block text-bbGray mb-1">USER NAME / KEY DIRECTORY ID</label>
-                        <input id="auth-username" type="text" required
-                            class="w-full bg-black border border-bbBorder px-3 py-2 text-bbCyan focus:outline-none focus:border-bbAmber uppercase"
-                            placeholder="e.g., QUANT_TRADER">
-                    </div>
-                    <div>
-                        <label class="block text-bbGray mb-1">SECURE ACCESS TOKEN (PASSWORD)</label>
-                        <input id="auth-password" type="password" required
-                            class="w-full bg-black border border-bbBorder px-3 py-2 text-bbCyan focus:outline-none focus:border-bbAmber"
-                            placeholder="••••••••">
-                    </div>
-                    <button id="auth-submit-btn" type="submit"
-                        class="w-full bg-bbAmber text-black font-bold py-2.5 hover:bg-yellow-600 transition duration-150">
-                        INITIALIZE TERMINAL SECURE LINK
-                    </button>
-                </form>
-
-                <div class="mt-6 border-t border-bbBorder/40 pt-4 flex flex-col space-y-2 text-[10px] text-bbGray">
-                    <div class="flex justify-between">
-                        <span>BACKEND CONNECTION STATUS:</span>
-                        <span id="backend-status-lbl" class="text-bbGray">DIAGNOSING NETWORK...</span>
-                    </div>
-                    <p class="text-center text-[9px] text-bbAmber/60 mt-1">If your backend cloud server is asleep, the
-                        sandbox infrastructure handles authorization locally automatically.</p>
-                </div>
-            </div>
-        </div>
-
-        <div id="terminal-workspace"
-            class="absolute inset-0 grid grid-cols-1 xl:grid-cols-4 p-3 gap-3 opacity-0 pointer-events-none transition-opacity duration-300">
-
+        <div id="terminal-workspace" class="absolute inset-0 grid grid-cols-1 xl:grid-cols-4 p-3 gap-3 opacity-100 transition-opacity duration-300">
+            <!-- LEFT PANEL (unchanged) -->
             <div class="xl:col-span-1 flex flex-col space-y-3 min-h-0">
-
                 <div class="bg-bbPanel border border-bbBorder p-2.5 flex flex-col shrink-0">
-                    <div class="text-[10px] text-bbGray mb-1 tracking-wider uppercase font-bold">Interactive Terminal
-                        Command System</div>
+                    <div class="text-[10px] text-bbGray mb-1 tracking-wider uppercase font-bold">Interactive Terminal Command System</div>
                     <div class="flex bg-black border border-bbBorder focus-within:border-bbAmber transition p-1">
                         <span class="text-bbAmber font-bold px-1.5 flex items-center select-none text-sm">&gt;</span>
-                        <input id="terminal-cli" type="text"
-                            class="w-full bg-black text-bbAmber font-bold font-mono text-sm focus:outline-none uppercase py-0.5 px-1"
-                            placeholder="Type command (e.g. AAPL GP, TSLA DES)...">
-                    </div>
-                    <div class="flex justify-between items-center mt-1 text-[9px] text-bbGray px-0.5">
-                        <span>HELP MATRIX: Type <strong class="text-white">HELP</strong></span>
-                        <span id="active-user-badge" class="text-bbCyan">USER: --</span>
+                        <input id="terminal-cli" type="text" class="w-full bg-black text-bbAmber font-bold font-mono text-sm focus:outline-none uppercase py-0.5 px-1" placeholder="Type command (e.g. AAPL, TSLA, PORT, HELP)...">
                     </div>
                 </div>
 
                 <div class="bg-bbPanel border border-bbBorder p-3 flex-1 flex flex-col min-h-0">
                     <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-2 text-xs shrink-0">
-                        <span class="text-bbAmber font-bold tracking-wider">COMPREHENSIVE MONITOR WATCHLIST</span>
-                        <span class="text-[10px] text-bbGray font-mono">REAL-TIME FEEDS</span>
+                        <span class="text-bbAmber font-bold tracking-wider">WATCHLIST (MAG7)</span>
+                        <span class="text-[10px] text-bbGray font-mono">LIVE FEED</span>
                     </div>
-                    <div class="flex-1 overflow-y-auto pr-0.5">
-                        <table class="w-full text-left text-xs font-mono">
-                            <thead>
-                                <tr class="text-bbGray text-[10px] border-b border-bbBorder/40">
-                                    <th class="pb-1">SYMBOL</th>
-                                    <th class="pb-1 text-right">LAST SPOT</th>
-                                    <th class="pb-1 text-right">NET CHG</th>
-                                    <th class="pb-1 text-right">% CHG</th>
-                                </tr>
-                            </thead>
-                            <tbody id="watchlist-tbody">
-                            </tbody>
-                        </table>
+                    <div class="flex-1 overflow-y-auto pr-0.5" id="watchlist-container">
+                        <div class="watchlist-placeholder">Loading watchlist...</div>
                     </div>
                 </div>
 
                 <div class="bg-bbPanel border border-bbBorder p-3 shrink-0 flex flex-col">
                     <div class="border-b border-bbBorder pb-1 mb-2 text-xs flex justify-between items-center">
-                        <span class="text-bbAmber font-bold tracking-wider">PORTFOLIO DEPLOYMENT MANAGER</span>
+                        <span class="text-bbAmber font-bold tracking-wider">PORTFOLIO</span>
                         <span id="portfolio-cash-lbl" class="text-bbGreen font-bold">$100,000.00</span>
                     </div>
                     <div class="grid grid-cols-2 gap-2 text-xs mb-2">
                         <div>
                             <label class="text-[9px] text-bbGray block">ORDER TCKR</label>
-                            <input id="trade-symbol" type="text"
-                                class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none uppercase"
-                                placeholder="AAPL">
+                            <input id="trade-symbol" type="text" class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none uppercase" placeholder="AAPL">
                         </div>
                         <div>
                             <label class="text-[9px] text-bbGray block">VOLUME SIZE</label>
-                            <input id="trade-qty" type="number" min="1" step="1"
-                                class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none"
-                                placeholder="10">
+                            <input id="trade-qty" type="number" min="1" step="1" class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none" placeholder="10" value="10">
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
-                        <button id="trade-buy-btn"
-                            class="bg-emerald-950 hover:bg-emerald-800 text-bbGreen border border-bbGreen font-bold py-1.5 transition text-xs">EXECUTE
-                            BUY</button>
-                        <button id="trade-sell-btn"
-                            class="bg-red-950 hover:bg-red-900 text-bbRed border border-bbRed font-bold py-1.5 transition text-xs">LIQUIDATE
-                            (SELL)</button>
+                        <button onclick="executeQuickTrade('BUY')" class="bg-emerald-950 hover:bg-emerald-800 text-bbGreen border border-bbGreen font-bold py-1.5 transition text-xs">BUY</button>
+                        <button onclick="executeQuickTrade('SELL')" class="bg-red-950 hover:bg-red-900 text-bbRed border border-bbRed font-bold py-1.5 transition text-xs">SELL</button>
                     </div>
                 </div>
             </div>
 
-            <div class="xl:col-span-3 grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0">
-
-                <div class="lg:col-span-2 bg-bbPanel border border-bbBorder p-4 flex flex-col min-h-0 relative">
+            <!-- RIGHT PANEL: CHART -->
+            <div class="xl:col-span-3 flex flex-col min-h-0">
+                <div class="bg-bbPanel border border-bbBorder p-4 flex flex-col flex-1 min-h-0 relative">
                     <div class="absolute top-0 left-0 w-24 h-0.5 bg-bbAmber"></div>
-                    <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-3 text-xs shrink-0">
+                    <div class="flex items-center justify-between bg-black/60 border border-bbBorder p-2 mb-2 rounded shrink-0">
+                        <div class="flex items-center space-x-3">
+                            <span id="stock-symbol" class="text-xl font-bold text-bbAmber font-mono">AAPL</span>
+                            <span id="stock-name" class="text-xs text-bbGray font-sans">Apple Inc.</span>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <span id="stock-price" class="text-lg font-bold text-bbGreen font-mono">---</span>
+                            <div class="flex flex-col items-end leading-none font-mono">
+                                <span id="stock-change" class="text-xs text-bbGreen font-bold">---</span>
+                                <span id="stock-change-pct" class="text-[9px] text-bbGreen">---</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-3 text-xs shrink-0 flex-wrap gap-2">
                         <div class="flex items-center space-x-2">
                             <span class="inline-block w-2 h-2 rounded-full bg-bbAmber animate-pulse"></span>
-                            <span id="output-pane-title" class="text-bbAmber font-bold tracking-wider uppercase">MONITOR
-                                READOUT INTERPRETER</span>
+                            <span class="text-bbAmber font-bold tracking-wider uppercase">CHART</span>
                         </div>
-                        <span class="text-[10px] text-bbGray">SUB-PANE: FOCUS MODE</span>
-                    </div>
-
-                    <div id="output-terminal-display"
-                        class="flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-bbGreen leading-relaxed pr-1 select-text">
-                    </div>
-                </div>
-
-                <div class="lg:col-span-1 bg-bbPanel border border-bbBorder p-4 flex flex-col min-h-0 relative">
-                    <div class="absolute top-0 right-0 w-24 h-0.5 bg-bbCyan"></div>
-
-                    <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-2 text-xs shrink-0">
                         <div class="flex items-center space-x-2">
-                            <span class="text-bbCyan font-bold tracking-wider">BLOOMBERG COPILOT AI</span>
-                        </div>
-                        <span class="text-[9px] bg-cyan-950 text-bbCyan px-1.5 py-0.5 rounded font-bold">INTELLIGENT
-                            INTEGRATION</span>
-                    </div>
-
-                    <div id="copilot-chat-history"
-                        class="flex-1 overflow-y-auto pr-1 mb-3 space-y-3 text-xs flex flex-col select-text">
-                        <div class="bg-black/40 border-l-2 border-bbCyan p-2 text-bbGray">
-                            <strong class="text-bbCyan block text-[10px]">SYSTEM COPILOT INITIALIZED</strong>
-                            Welcome to the automated context gateway. Run terminal commands, asset lookups, or ask
-                            financial queries directly.
+                            <button onclick="changeInterval('1D')" id="btn-1D" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">1D</button>
+                            <button onclick="changeInterval('1W')" id="btn-1W" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">1W</button>
+                            <button onclick="changeInterval('1M')" id="btn-1M" class="px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold font-sans text-[10px]">1M</button>
+                            <button onclick="changeInterval('3M')" id="btn-3M" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">3M</button>
+                            <label class="flex items-center gap-1 text-[10px] ml-2 cursor-pointer">
+                                <input type="checkbox" id="line-mode-toggle" onchange="toggleChartType()"> Line
+                            </label>
                         </div>
                     </div>
 
-                    <div class="mt-auto shrink-0 border-t border-bbBorder/40 pt-2">
-                        <div
-                            class="flex bg-black border border-bbBorder focus-within:border-bbCyan transition rounded overflow-hidden">
-                            <input id="copilot-input" type="text"
-                                class="w-full bg-black text-bbCyan font-mono text-xs focus:outline-none p-2"
-                                placeholder="Query corporate metrics, statements...">
-                            <button id="copilot-send-btn"
-                                class="bg-cyan-950 hover:bg-cyan-900 border-l border-bbBorder px-3 text-bbCyan text-xs transition font-bold">SEND</button>
-                        </div>
+                    <div class="flex-1 w-full min-h-[350px] h-full relative rounded overflow-hidden bg-black" id="chart-parent-container">
+                        <div id="chart-container" class="w-full h-full"></div>
                     </div>
                 </div>
             </div>
+        </div>
     </main>
 
-    <footer id="portfolio-tray"
-        class="bg-bbHeader border-t border-bbBorder p-2 text-[11px] shrink-0 overflow-x-auto whitespace-nowrap hidden">
-        <div class="flex items-center space-x-4" id="portfolio-positions-list">
-            <span class="text-bbGray font-bold uppercase">ACTIVE ENGINE POSITIONS:</span>
+    <footer class="bg-bbHeader border-t border-bbBorder p-2 text-[11px] shrink-0 overflow-x-auto whitespace-nowrap">
+        <div class="flex items-center space-x-4 font-mono" id="portfolio-positions-list">
+            <span class="text-bbGray font-bold uppercase">PORTFOLIO POSITIONS:</span>
         </div>
     </footer>
 
-    </main>
+    <div id="help-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4">
+        <div class="bg-bbPanel border-2 border-bbBorder w-full max-w-lg p-5 rounded shadow-2xl relative">
+            <h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-bbBorder pb-1 flex justify-between items-center">
+                <span>COMMAND DIRECTORY</span>
+                <button onclick="toggleHelpModal()" class="text-bbGray hover:text-bbRed">✖</button>
+            </h2>
+            <div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] font-mono text-neutral-300">
+                <p class="text-bbGray mb-2">Enter commands in the header bar & press Enter.</p>
+                <table class="w-full text-left">
+                    <thead><tr class="text-bbGray border-b border-bbBorder"><th>COMMAND</th><th>ACTION</th></td></thead>
+                    <tbody>
+                        <tr><td class="text-bbAmber">AAPL</td><td>Switch focus to Apple</td></tr>
+                        <tr><td class="text-bbAmber">TSLA</td><td>Switch focus to Tesla</td></tr>
+                        <tr><td class="text-bbAmber">BUY AAPL 10</td><td>Buy 10 shares of AAPL</td></tr>
+                        <tr><td class="text-bbAmber">SELL TSLA 5</td><td>Sell 5 shares of TSLA</td></tr>
+                        <tr><td class="text-bbAmber">PORT</td><td>Show portfolio</td></tr>
+                        <tr><td class="text-bbAmber">HELP</td><td>This menu</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
     <script>
-        // =========================================================================
-        // 1. CENTRAL ACCESS GATEWAY ARCHITECTURE & NETWORKING CONFIGURATION
-        // =========================================================================
+        // ==================== CONFIGURATION ====================
+        const FINNHUB_PROXY = '/api/finnhub?endpoint=';
+        const YAHOO_PROXY = '/api/yahoo?';
+        const ALPHA_VANTAGE_PROXY = '/api/alphavantage?function=TIME_SERIES_DAILY&symbol=';
+        const TWELVE_DATA_PROXY = '/api/twelvedata?';
+        
+        // Cache expiration (1 hour)
+        const CACHE_TTL = 60 * 60 * 1000;
 
-        // --- CENTRAL ACCESS GATEWAY ARCHITECTURE ---
-        // In production, swap 'http://localhost:3000' with your live hosting root URL (e.g., Render Web Service)
-        const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-            ? 'http://localhost:3000'
-            : 'http://localhost:3000'; // Change this string to your live Render backend URL when deploying!
+        let currentSymbol = 'AAPL';
+        let currentInterval = '1M';
+        let chart = null;
+        let candleSeries = null;
+        let volumeSeries = null;
+        let lineSeries = null;
+        let isLineMode = false;
+        let ws = null;
+        let priceCache = {};
+        let watchlistSymbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META'];
+        let portfolio = JSON.parse(localStorage.getItem('bb_portfolio')) || { cash: 100000.00, holdings: {} };
 
-        // GLOBAL APPLICATION VOLATILE RUNTIME STATE
-        let state = {
-            isSandboxMode: false,
-            token: null,
-            username: null,
-            activeSymbol: 'AAPL',
-            portfolio: {
-                cash: 100000.00,
-                positions: {} // e.g. { "AAPL": { qty: 10, avgPrice: 175.50 } }
-            },
-            // Simulated local pricing mock database (Acts as instant sandbox backup engine)
-            marketDatabase: {
-                "AAPL": { name: "Apple Inc.", price: 182.50, changePct: 0.85, high: 183.20, low: 180.10, pe: 28.4, cap: "2.85T", volume: "52M", beta: 1.2, cash: 67000, revenue: 385000 },
-                "TSLA": { name: "Tesla Inc.", price: 179.20, changePct: -2.41, high: 184.00, low: 176.50, pe: 42.1, cap: "570B", volume: "84M", beta: 1.6, cash: 29000, revenue: 96000 },
-                "NVDA": { name: "NVIDIA Corp.", price: 875.00, changePct: 4.12, high: 880.00, low: 840.10, pe: 74.3, cap: "2.18T", volume: "41M", beta: 1.8, cash: 26000, revenue: 60000 },
-                "MSFT": { name: "Microsoft Corp.", price: 415.50, changePct: 0.15, high: 418.00, low: 413.20, pe: 36.2, cap: "3.09T", volume: "22M", beta: 1.1, cash: 80000, revenue: 227000 },
-                "AMZN": { name: "Amazon.com Inc.", price: 178.40, changePct: -1.10, high: 181.20, low: 177.00, pe: 61.8, cap: "1.85T", volume: "33M", beta: 1.3, cash: 54000, revenue: 574000 },
-                "BTC": { name: "Bitcoin / USD Spot", price: 67250.00, changePct: 1.95, high: 68100.00, low: 65900.00, pe: "N/A", cap: "1.32T", volume: "28B", beta: 2.4, cash: "N/A", revenue: "N/A" }
-            }
-        };
-
-        // =========================================================================
-        // 2. NETWORK CONSOLE AUTO DIALER DIAGNOSTICS
-        // =========================================================================
-        async function inspectBackendAvailability() {
-            const lbl = document.getElementById('backend-status-lbl');
-            const badge = document.getElementById('security-badge');
+        // Helper: fetch with timeout
+        async function fetchWithTimeout(url, timeoutMs = 8000) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
             try {
-                const res = await fetch(`${API_URL}/api/health`, { method: 'GET' }).catch(e => { throw e; });
-                if (res.ok) {
-                    state.isSandboxMode = false;
-                    lbl.textContent = "CONNECTED (LIVE SECURE CLOUD)";
-                    lbl.className = "text-bbGreen font-bold";
-                    badge.textContent = "SERVER_PROXY_JWT";
-                    badge.className = "text-bbGreen font-bold";
-                } else {
-                    throw new Error("Unreachable");
-                }
+                const res = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeout);
+                return res;
             } catch (err) {
-                state.isSandboxMode = true;
-                lbl.textContent = "OFFLINE (EMULATED SANDBOX CAPABLE)";
-                lbl.className = "text-bbAmber font-bold animate-pulse";
-                badge.textContent = "LOCAL_SANDBOX_MOCK";
-                badge.className = "text-bbAmber font-bold";
+                clearTimeout(timeout);
+                throw err;
             }
         }
 
-        // =========================================================================
-        // 3. SECURE AUTHENTICATION FLOW MANAGEMENT (JWT & LOCAL GATEWAY)
-        // =========================================================================
-        let currentAuthTab = 'LOGIN';
-        const tabLogin = document.getElementById('tab-login');
-        const tabRegister = document.getElementById('tab-register');
-        const authSubmitBtn = document.getElementById('auth-submit-btn');
-        const authForm = document.getElementById('auth-form');
-        const authAlert = document.getElementById('auth-alert');
-
-        tabLogin.addEventListener('click', () => {
-            currentAuthTab = 'LOGIN';
-            tabLogin.className = "flex-1 py-2 text-center text-bbAmber border-b-2 border-bbAmber font-bold";
-            tabRegister.className = "flex-1 py-2 text-center text-bbGray hover:text-white transition";
-            authSubmitBtn.textContent = "INITIALIZE TERMINAL SECURE LINK";
-            authAlert.classList.add('hidden');
-        });
-
-        tabRegister.addEventListener('click', () => {
-            currentAuthTab = 'REGISTER';
-            tabRegister.className = "flex-1 py-2 text-center text-bbAmber border-b-2 border-bbAmber font-bold";
-            tabLogin.className = "flex-1 py-2 text-center text-bbGray hover:text-white transition";
-            authSubmitBtn.textContent = "PROVISION NEW SECURE NODE ACCOUNT";
-            authAlert.classList.add('hidden');
-        });
-
-        authForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            authAlert.classList.add('hidden');
-            const usernameInput = document.getElementById('auth-username').value.trim().toUpperCase();
-            const passwordInput = document.getElementById('auth-password').value;
-
-            if (!usernameInput || !passwordInput) return;
-
-            // SCENARIO 1: SANDBOX RUNTIME AUTOMATED INTERACTION
-            if (state.isSandboxMode) {
-                if (currentAuthTab === 'LOGIN') {
-                    // Simulation accepts any alphanumeric logins for smooth prototyping access
-                    initializeSecureTerminalSession("MOCK_JWT_SANDBOX_TOKEN", usernameInput);
-                } else {
-                    authAlert.className = "mb-4 p-2.5 text-xs bg-emerald-950/50 border border-bbGreen text-bbGreen";
-                    authAlert.textContent = "SANDBOX ACCOUNT PROVISIONED. PROCEED TO LOG IN NOW.";
-                    authAlert.classList.remove('hidden');
-                    tabLogin.click();
+        // ==================== CACHING HELPERS ====================
+        function getCachedCandles(symbol, days) {
+            const key = `candles_${symbol}_${days}`;
+            const cached = localStorage.getItem(key);
+            if (cached) {
+                const { timestamp, data } = JSON.parse(cached);
+                if (Date.now() - timestamp < CACHE_TTL) {
+                    console.log(`Using cached candles for ${symbol} (${days}d)`);
+                    return data;
                 }
-                return;
             }
-
-            // SCENARIO 2: LIVE BACKEND CRYPTOGRAPHIC OPERATIONS VIA PROXY
-            const endpoint = currentAuthTab === 'LOGIN' ? '/api/auth/login' : '/api/auth/register';
-            try {
-                const response = await fetch(`${API_URL}${endpoint}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: usernameInput, password: passwordInput })
-                });
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.message || "Security gateway denied structural transaction.");
-                }
-
-                if (currentAuthTab === 'LOGIN') {
-                    initializeSecureTerminalSession(data.token, data.username);
-                } else {
-                    authAlert.className = "mb-4 p-2.5 text-xs bg-emerald-950/50 border border-bbGreen text-bbGreen";
-                    authAlert.textContent = "NODE SECURITY ACCOUNT CREATED. EXECUTE CREDENTIAL VALIDATION.";
-                    authAlert.classList.remove('hidden');
-                    tabLogin.click();
-                }
-            } catch (err) {
-                authAlert.className = "mb-4 p-2.5 text-xs bg-red-950/50 border border-bbRed text-red-400";
-                authAlert.textContent = `GATEWAY ERROR: ${err.message}`;
-                authAlert.classList.remove('hidden');
-            }
-        });
-
-        function initializeSecureTerminalSession(token, username) {
-            state.token = token;
-            state.username = username;
-
-            // Wipe forms secure cache footprint
-            document.getElementById('auth-password').value = '';
-
-            // Toggle Display Panes UI Transitions
-            document.getElementById('auth-gateway').classList.add('opacity-0', 'pointer-events-none');
-            const workspace = document.getElementById('terminal-workspace');
-            workspace.classList.remove('opacity-0', 'pointer-events-none');
-            document.getElementById('logout-btn').classList.remove('hidden');
-            document.getElementById('portfolio-tray').classList.remove('hidden');
-            document.getElementById('active-user-badge').textContent = `USER: ${username}`;
-
-            // Sync structural profiles or download network configurations if online
-            synchronizePortfolioLedger();
-            renderWatchlistCore();
-            executeTerminalCommand(`${state.activeSymbol} GP`);
+            return null;
         }
 
-        document.getElementById('logout-btn').addEventListener('click', () => {
-            state.token = null;
-            state.username = null;
-            document.getElementById('auth-gateway').classList.remove('opacity-0', 'pointer-events-none');
-            document.getElementById('terminal-workspace').classList.add('opacity-0', 'pointer-events-none');
-            document.getElementById('logout-btn').classList.add('hidden');
-            document.getElementById('portfolio-tray').classList.add('hidden');
-        });
+        function setCachedCandles(symbol, days, candles) {
+            const key = `candles_${symbol}_${days}`;
+            const cacheEntry = {
+                timestamp: Date.now(),
+                data: candles
+            };
+            localStorage.setItem(key, JSON.stringify(cacheEntry));
+        }
 
-        // =========================================================================
-        // 4. PORTFOLIO DEPLOYMENT MANAGER & TRANSACTION LEDGERS
-        // =========================================================================
-        async function synchronizePortfolioLedger() {
-            if (state.isSandboxMode) {
-                updatePortfolioUIDisplays();
-                return;
-            }
+        // ==================== QUOTE (Finnhub) ====================
+        async function loadQuote(symbol) {
             try {
-                const res = await fetch(`${API_URL}/api/portfolio`, {
-                    headers: { 'Authorization': `Bearer ${state.token}` }
-                });
-                if (res.ok) {
+                const res = await fetchWithTimeout(FINNHUB_PROXY + `quote?symbol=${symbol}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const quote = await res.json();
+                if (quote && quote.c !== undefined) {
+                    priceCache[symbol] = {
+                        price: quote.c,
+                        change: quote.d,
+                        changePct: quote.dp,
+                        high: quote.h,
+                        low: quote.l,
+                        open: quote.o,
+                        volume: quote.v,
+                        bid: quote.b,
+                        ask: quote.a
+                    };
+                    if (symbol === currentSymbol) updateQuotePanel(priceCache[symbol]);
+                    return priceCache[symbol];
+                }
+            } catch(e) {
+                console.warn(`Quote fail for ${symbol}`, e);
+            }
+            return null;
+        }
+
+        function updateQuotePanel(data) {
+            const priceEl = document.getElementById('stock-price');
+            const changeEl = document.getElementById('stock-change');
+            const changePctEl = document.getElementById('stock-change-pct');
+            if (!priceEl) return;
+            priceEl.innerText = data.price.toFixed(2);
+            changeEl.innerText = (data.change >= 0 ? '+' : '') + data.change.toFixed(2);
+            changePctEl.innerText = (data.changePct >= 0 ? '+' : '') + data.changePct.toFixed(2) + '%';
+            const cls = data.change >= 0 ? 'text-bbGreen' : 'text-bbRed';
+            priceEl.className = `text-lg font-bold ${cls} tracking-wide font-mono`;
+            changeEl.className = `${cls} font-bold font-mono`;
+            changePctEl.className = `${cls} text-[10px] font-mono`;
+        }
+
+        // ==================== CANDLES (Yahoo Finance primary + fallbacks) ====================
+        async function loadHistorical(symbol, days) {
+            // Map days to Yahoo Finance range
+            let range = '1mo';
+            if (days <= 1) range = '1d';
+            else if (days <= 7) range = '5d';
+            else if (days <= 31) range = '1mo';
+            else if (days <= 93) range = '3mo';
+            else if (days <= 186) range = '6mo';
+            else range = '1y';
+            
+            // Try cache first
+            const cached = getCachedCandles(symbol, days);
+            if (cached) return cached;
+            
+            // Try Yahoo Finance
+            const yahooUrl = `${YAHOO_PROXY}symbol=${symbol}&interval=1d&range=${range}`;
+            try {
+                console.log(`Fetching candles from Yahoo for ${symbol} (${range})`);
+                const res = await fetchWithTimeout(yahooUrl, 10000);
+                const json = await res.json();
+                if (json.success && json.data && json.data.length) {
+                    let candles = json.data.slice(-days);
+                    setCachedCandles(symbol, days, candles);
+                    console.log(`Yahoo success: ${candles.length} candles for ${symbol}`);
+                    return candles;
+                }
+                throw new Error('No data from Yahoo');
+            } catch (err) {
+                console.warn(`Yahoo failed for ${symbol}, trying fallbacks`, err);
+                // Fallback to Alpha Vantage
+                try {
+                    const alphaUrl = `${ALPHA_VANTAGE_PROXY}${symbol}&outputsize=compact`;
+                    const res = await fetchWithTimeout(alphaUrl, 10000);
                     const data = await res.json();
-                    state.portfolio = data;
-                    updatePortfolioUIDisplays();
+                    if (data && data['Time Series (Daily)']) {
+                        const ts = data['Time Series (Daily)'];
+                        const dates = Object.keys(ts).sort().slice(-days);
+                        const candles = dates.map(date => ({
+                            time: date,
+                            open: parseFloat(ts[date]['1. open']),
+                            high: parseFloat(ts[date]['2. high']),
+                            low: parseFloat(ts[date]['3. low']),
+                            close: parseFloat(ts[date]['4. close']),
+                            volume: parseInt(ts[date]['5. volume'])
+                        }));
+                        setCachedCandles(symbol, days, candles);
+                        return candles;
+                    }
+                    throw new Error('No Alpha Vantage data');
+                } catch (alphaErr) {
+                    console.warn(`Alpha Vantage failed for ${symbol}, trying Twelve Data`);
+                    // Fallback to Twelve Data
+                    try {
+                        const twelveUrl = `${TWELVE_DATA_PROXY}symbol=${symbol}&interval=1day&outputsize=${Math.min(days, 100)}`;
+                        const res = await fetchWithTimeout(twelveUrl, 8000);
+                        const data = await res.json();
+                        if (data && data.values && data.values.length) {
+                            const candles = data.values.slice(0, days).map(v => ({
+                                time: v.datetime,
+                                open: parseFloat(v.open),
+                                high: parseFloat(v.high),
+                                low: parseFloat(v.low),
+                                close: parseFloat(v.close),
+                                volume: parseInt(v.volume || 0)
+                            }));
+                            setCachedCandles(symbol, days, candles);
+                            return candles;
+                        }
+                        throw new Error('No Twelve Data');
+                    } catch (twelveErr) {
+                        console.error(`All candle sources failed for ${symbol}`);
+                        return [];
+                    }
                 }
-            } catch (e) {
-                console.error("Failed structural portfolio update sync.", e);
             }
         }
 
-        function updatePortfolioUIDisplays() {
-            document.getElementById('portfolio-cash-lbl').textContent = `$${state.portfolio.cash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            const container = document.getElementById('portfolio-positions-list');
-            container.innerHTML = `<span class="text-bbGray font-bold uppercase">ACTIVE ENGINE POSITIONS:</span>`;
+        // ==================== PROFILE ====================
+        async function loadProfile(symbol) {
+            try {
+                const res = await fetchWithTimeout(FINNHUB_PROXY + `stock/profile2?symbol=${symbol}`);
+                const profile = await res.json();
+                if (profile && profile.name) document.getElementById('stock-name').innerText = profile.name;
+            } catch(e) {}
+        }
 
-            const activeHoldingsKeys = Object.keys(state.portfolio.positions);
-            if (activeHoldingsKeys.length === 0) {
-                container.innerHTML += `<span class="text-bbGray italic">ZERO RISK OUTSTANDING (PORTFOLIO CLEAR)</span>`;
-                return;
+        // ==================== CHART ====================
+        function initChart() {
+            const container = document.getElementById('chart-container');
+            const parent = document.getElementById('chart-parent-container');
+            if (!container || !parent) return;
+            container.innerHTML = '';
+            const width = parent.clientWidth || 600;
+            const height = parent.clientHeight - 80 || 400;
+            chart = LightweightCharts.createChart(container, {
+                width: width,
+                height: height,
+                layout: { background: { color: '#000000' }, textColor: '#a0a0a0' },
+                grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                rightPriceScale: { borderColor: '#282828' },
+                timeScale: { borderColor: '#282828', timeVisible: true }
+            });
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#00ff00',
+                downColor: '#ff3333',
+                borderDownColor: '#ff3333',
+                borderUpColor: '#00ff00',
+                wickDownColor: '#ff3333',
+                wickUpColor: '#00ff00'
+            });
+            volumeSeries = chart.addHistogramSeries({
+                color: '#26a69a',
+                priceFormat: { type: 'volume' },
+                priceScaleId: 'volume',
+                lineWidth: 1,
+                priceLineVisible: false
+            });
+            chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+            lineSeries = chart.addLineSeries({ color: '#dfb257', lineWidth: 2, priceLineVisible: false });
+            if (lineSeries && typeof lineSeries.setVisible === 'function') {
+                lineSeries.setVisible(false);
             }
-
-            activeHoldingsKeys.forEach(sym => {
-                const pos = state.portfolio.positions[sym];
-                if (pos.qty > 0) {
-                    const trackingData = state.marketDatabase[sym] || { price: pos.avgPrice };
-                    const value = pos.qty * trackingData.price;
-                    container.innerHTML += `
-                        <span class="inline-block border border-bbBorder bg-black px-2 py-0.5 rounded">
-                            <strong class="text-white">${sym}</strong>: ${pos.qty} SHARES @ Avg $${pos.avgPrice.toFixed(2)} 
-                            (<span class="${trackingData.price >= pos.avgPrice ? 'text-bbGreen' : 'text-bbRed'}">$${value.toFixed(2)}</span>)
-                        </span>
-                    `;
+            const resizeObserver = new ResizeObserver(() => {
+                if (chart) {
+                    const newWidth = parent.clientWidth;
+                    const newHeight = parent.clientHeight - 80;
+                    if (newWidth > 0 && newHeight > 0) chart.resize(newWidth, newHeight);
                 }
             });
+            resizeObserver.observe(parent);
         }
 
-        async function processTradeOrderTransaction(type) {
-            const symbol = document.getElementById('trade-symbol').value.trim().toUpperCase();
-            const qty = parseInt(document.getElementById('trade-qty').value);
-
-            if (!symbol || isNaN(qty) || qty <= 0) {
-                alert("ORDER EXECUTION FAULT: Invalid configuration for symbol or quantity parameters.");
-                return;
-            }
-
-            const asset = state.marketDatabase[symbol];
-            if (!asset) {
-                alert(`UNSUPPORTED INSTRUMENT: Tick profile for [${symbol}] not recognized by clearing architecture.`);
-                return;
-            }
-
-            // SANDBOX FAILOVER FLOW
-            if (state.isSandboxMode) {
-                const executionPrice = asset.price;
-                const totalCost = executionPrice * qty;
-
-                if (type === 'BUY') {
-                    if (state.portfolio.cash < totalCost) {
-                        alert("MARGIN FAILURE: Insufficient liquidity reserves available inside sandbox system.");
-                        return;
-                    }
-                    state.portfolio.cash -= totalCost;
-                    if (!state.portfolio.positions[symbol]) {
-                        state.portfolio.positions[symbol] = { qty: 0, avgPrice: 0 };
-                    }
-                    const existing = state.portfolio.positions[symbol];
-                    existing.avgPrice = ((existing.avgPrice * existing.qty) + totalCost) / (existing.qty + qty);
-                    existing.qty += qty;
-                } else {
-                    const existing = state.portfolio.positions[symbol];
-                    if (!existing || existing.qty < qty) {
-                        alert("ORDER ABORT: Asset volumes surpass clearing capacity available inside inventory.");
-                        return;
-                    }
-                    state.portfolio.cash += totalCost;
-                    existing.qty -= qty;
-                    if (existing.qty === 0) delete state.portfolio.positions[symbol];
+        async function loadChartData(symbol, days) {
+            if (!candleSeries) return;
+            const candles = await loadHistorical(symbol, days);
+            if (candles.length) {
+                candleSeries.setData(candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+                volumeSeries.setData(candles.map(c => ({ time: c.time, value: c.volume, color: c.close >= c.open ? '#00ff00' : '#ff3333' })));
+                if (lineSeries && typeof lineSeries.setData === 'function') {
+                    lineSeries.setData(candles.map(c => ({ time: c.time, value: c.close })));
                 }
-
-                updatePortfolioUIDisplays();
-                executeTerminalCommand(`${symbol} GP`);
-                return;
-            }
-
-            // LIVE SECURE PRODUCTION ENGINE ROUTING
-            try {
-                const res = await fetch(`${API_URL}/api/portfolio/trade`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${state.token}`
-                    },
-                    body: JSON.stringify({ type, symbol, qty, price: asset.price })
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.message || "Trade transaction deployment failure.");
-
-                state.portfolio = data.portfolio;
-                updatePortfolioUIDisplays();
-                executeTerminalCommand(`${symbol} GP`);
-            } catch (e) {
-                alert(`TRADE SETTLING REJECTION: ${e.message}`);
+                if (candleSeries && lineSeries && typeof candleSeries.setVisible === 'function' && typeof lineSeries.setVisible === 'function') {
+                    candleSeries.setVisible(!isLineMode);
+                    lineSeries.setVisible(isLineMode);
+                }
+                chart.timeScale().fitContent();
+                const errorDiv = document.querySelector('#chart-container .chart-error');
+                if (errorDiv) errorDiv.remove();
+            } else {
+                const container = document.getElementById('chart-container');
+                let errorDiv = container.querySelector('.chart-error');
+                if (!errorDiv) {
+                    errorDiv = document.createElement('div');
+                    errorDiv.className = 'chart-error';
+                    errorDiv.innerText = `No historical data for ${symbol}. Check API keys.`;
+                    container.appendChild(errorDiv);
+                }
+                candleSeries.setData([]);
+                volumeSeries.setData([]);
+                if (lineSeries) lineSeries.setData([]);
             }
         }
 
-        document.getElementById('trade-buy-btn').addEventListener('click', () => processTradeOrderTransaction('BUY'));
-        document.getElementById('trade-sell-btn').addEventListener('click', () => processTradeOrderTransaction('SELL'));
+        function toggleChartType() {
+            isLineMode = document.getElementById('line-mode-toggle').checked;
+            if (candleSeries && lineSeries && typeof candleSeries.setVisible === 'function' && typeof lineSeries.setVisible === 'function') {
+                candleSeries.setVisible(!isLineMode);
+                lineSeries.setVisible(isLineMode);
+            }
+        }
 
-        // =========================================================================
-        // 5. HIGH-DENSITY MONITOR WATCHLIST RENDER ENGINE
-        // =========================================================================
-        function renderWatchlistCore() {
+        // ==================== WATCHLIST (parallel loading) ====================
+        async function renderWatchlist() {
+            const container = document.getElementById('watchlist-container');
+            container.innerHTML = '<div class="watchlist-placeholder">Loading watchlist...</div>';
+            
+            const table = document.createElement('table');
+            table.className = "w-full text-left text-xs font-mono";
+            table.innerHTML = `<thead><tr class="text-bbGray text-[10px] border-b border-bbBorder/40">
+                <th class="pb-1">SYMBOL</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th>
+            </tr></thead><tbody id="watchlist-tbody"></tbody>`;
+            container.innerHTML = '';
+            container.appendChild(table);
             const tbody = document.getElementById('watchlist-tbody');
-            tbody.innerHTML = '';
-
-            Object.keys(state.marketDatabase).forEach(sym => {
-                const item = state.marketDatabase[sym];
-                const isPositive = item.changePct >= 0;
-                const row = document.createElement('tr');
-                row.className = "border-b border-bbBorder/20 hover:bg-white/5 cursor-pointer transition py-1";
-                row.innerHTML = `
+            
+            const results = await Promise.allSettled(watchlistSymbols.map(sym => loadQuote(sym)));
+            for (let i = 0; i < watchlistSymbols.length; i++) {
+                const sym = watchlistSymbols[i];
+                const result = results[i];
+                const data = result.status === 'fulfilled' && result.value ? result.value : null;
+                if (!data) continue;
+                const isUp = data.change >= 0;
+                const tr = document.createElement('tr');
+                tr.id = `wst-row-${sym}`;
+                tr.className = "border-b border-bbBorder/20 hover:bg-white/5 cursor-pointer transition py-1 font-mono";
+                tr.onclick = () => changeActiveSymbol(sym);
+                tr.innerHTML = `
                     <td class="py-1.5 font-bold text-white">${sym}</td>
-                    <td class="py-1.5 text-right font-bold text-bbCyan">${formatAssetPrice(item.price)}</td>
-                    <td class="py-1.5 text-right ${isPositive ? 'text-bbGreen' : 'text-bbRed'}">${isPositive ? '+' : ''}${(item.price * (item.changePct / 100)).toFixed(2)}</td>
-                    <td class="py-1.5 text-right font-bold ${isPositive ? 'text-bbGreen' : 'text-bbRed'}">${isPositive ? '+' : ''}${item.changePct.toFixed(2)}%</td>
+                    <td class="py-1.5 text-right font-bold text-bbCyan">${data.price.toFixed(2)}</td>
+                    <td class="py-1.5 text-right ${isUp ? 'text-bbGreen' : 'text-bbRed'}">${isUp ? '+' : ''}${data.change.toFixed(2)}</td>
+                    <td class="py-1.5 text-right font-bold ${isUp ? 'text-bbGreen' : 'text-bbRed'}">${isUp ? '+' : ''}${data.changePct.toFixed(2)}%</td>
                 `;
-                row.addEventListener('click', () => {
-                    document.getElementById('trade-symbol').value = sym;
-                    executeTerminalCommand(`${sym} GP`);
-                });
-                tbody.appendChild(row);
+                tbody.appendChild(tr);
+            }
+            if (tbody.children.length === 0) {
+                container.innerHTML = '<div class="watchlist-placeholder">No quote data – check Finnhub API key and backend.</div>';
+            }
+        }
+
+        function updateWatchlistRow(sym, data) {
+            const row = document.getElementById(`wst-row-${sym}`);
+            if (!row) return;
+            const cells = row.cells;
+            if (cells.length >= 4) {
+                cells[1].innerText = data.price.toFixed(2);
+                cells[2].innerHTML = (data.change >= 0 ? '+' : '') + data.change.toFixed(2);
+                cells[3].innerHTML = (data.changePct >= 0 ? '+' : '') + data.changePct.toFixed(2) + '%';
+                const cls = data.change >= 0 ? 'text-bbGreen' : 'text-bbRed';
+                cells[2].className = `py-1.5 text-right ${cls}`;
+                cells[3].className = `py-1.5 text-right font-bold ${cls}`;
+            }
+        }
+
+        // ==================== SYMBOL CHANGE & INTERVALS ====================
+        async function changeActiveSymbol(symbol) {
+            currentSymbol = symbol;
+            document.getElementById('stock-symbol').innerText = symbol;
+            document.getElementById('trade-symbol').value = symbol;
+            await loadProfile(symbol);
+            await loadQuote(symbol);
+            let days = 30;
+            if (currentInterval === '1D') days = 1;
+            else if (currentInterval === '1W') days = 7;
+            else if (currentInterval === '3M') days = 90;
+            else days = 30;
+            await loadChartData(symbol, days);
+        }
+
+        function changeInterval(interval) {
+            currentInterval = interval;
+            ['1D','1W','1M','3M'].forEach(btn => {
+                const el = document.getElementById(`btn-${btn}`);
+                if (el) el.className = btn === interval ? 'px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold font-sans text-[10px]' : 'px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]';
             });
+            let days = 30;
+            if (interval === '1D') days = 1;
+            else if (interval === '1W') days = 7;
+            else if (interval === '3M') days = 90;
+            else days = 30;
+            loadChartData(currentSymbol, days);
         }
 
-        function formatAssetPrice(val) {
-            return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
-
-        // =========================================================================
-        // 6. TERMINAL INTERPRETER COMMAND ROUTING SYSTEM
-        // =========================================================================
-        const cliInput = document.getElementById('terminal-cli');
-        cliInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                const commandText = cliInput.value.trim();
-                if (commandText) {
-                    executeTerminalCommand(commandText);
-                    cliInput.value = '';
-                }
-            }
-        });
-
-        function executeTerminalCommand(input) {
-            const display = document.getElementById('output-terminal-display');
-            const paneTitle = document.getElementById('output-pane-title');
-            const sanitized = input.trim().toUpperCase();
-
-            if (!sanitized) return;
-
-            // Global System Routing Table
-            if (sanitized === 'HELP') {
-                paneTitle.textContent = "GLOBAL COMMAND SYSTEM INTERFACE INDEX";
-                display.className = "flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-bbAmber leading-relaxed pr-1 select-text";
-                display.innerHTML = `
-===============================================================================
-                       BLOOMBERG REALTOR SYSTEM MATRIX HELP
-===============================================================================
-
-The Command interface allows high-efficiency data querying via cross-asset tokens.
-Syntax structure consists of an [INSTRUMENT TICKER ID] followed by a [FUNCTION KEY].
-
-CORE TRANSACTION SYMBOLS IN SYSTEM DIRECTORY:
-• AAPL   (Apple Inc.)      • TSLA   (Tesla Motor Core)   • NVDA (NVIDIA Compute Architecture)
-• MSFT   (Microsoft Corp)  • AMZN   (Amazon Logistics)   • BTC  (Bitcoin Spot Value Asset)
-
-CORE FUNCTION ARRAYS:
-1. [SYMBOL] GP    : Render operational analytics plots and tracking parameters.
-2. [SYMBOL] DES   : Observe detailed corporate summary matrices and financial statements.
-3. [SYMBOL] TECH  : Extract technical quantitative indicators and baseline data pools.
-
-MANAGEMENT CONFIGURATIONS:
-• HELP            : Display this technical instruction core framework.
-• CLEAR           : Flush system display registers cleanly.
-
-Example actions: Type "NVDA GP" or "BTC DES" into the main command target parameter.
-===============================================================================`;
-                return;
-            }
-
-            if (sanitized === 'CLEAR') {
-                display.innerHTML = '';
-                return;
-            }
-
-            // Split Token Arguments Array Parsing
-            const argumentsArray = sanitized.split(/\s+/);
-            const targetSymbol = argumentsArray[0];
-            const functionKey = argumentsArray[1] || 'GP';
-
-            const asset = state.marketDatabase[targetSymbol];
-            if (!asset) {
-                display.className = "flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-bbRed leading-relaxed pr-1";
-                display.innerHTML = `⚠️ COMMAND DISPATCH EXCEPTION: Instrument tracker identifier [${targetSymbol}] not found in standard data register index.`;
-                return;
-            }
-
-            state.activeSymbol = targetSymbol;
-            document.getElementById('trade-symbol').value = targetSymbol;
-            paneTitle.textContent = `${targetSymbol} Equity - Function Registry: ${functionKey}`;
-
-            // Adjust textual output terminal tint values natively based on the analytical window
-            if (functionKey === 'DES') {
-                display.className = "flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-bbCyan leading-relaxed pr-1 select-text";
-                display.innerHTML = generateInstrumentDescriptionPane(targetSymbol, asset);
-            } else if (functionKey === 'TECH') {
-                display.className = "flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-bbAmber leading-relaxed pr-1 select-text";
-                display.innerHTML = generateInstrumentTechnicalAnalysisPane(targetSymbol, asset);
+        // ==================== PORTFOLIO & TRADING ====================
+        function executeQuickTrade(action) {
+            const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
+            const qty = parseFloat(document.getElementById('trade-qty').value);
+            if (!priceCache[sym] || isNaN(qty) || qty <= 0) return;
+            const price = priceCache[sym].price;
+            const total = price * qty;
+            if (action === 'BUY') {
+                if (portfolio.cash < total) { alert('INSUFFICIENT FUNDS'); return; }
+                portfolio.cash -= total;
+                if (!portfolio.holdings[sym]) portfolio.holdings[sym] = { qty: 0, avgPrice: 0 };
+                const h = portfolio.holdings[sym];
+                h.avgPrice = ((h.avgPrice * h.qty) + total) / (h.qty + qty);
+                h.qty += qty;
             } else {
-                // DEFAULT RENDER ROUTING: THE DYNAMIC LIVE ANALYTICS CHARTS (GP)
-                display.className = "flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-bbGreen leading-relaxed pr-1 select-text";
-                display.innerHTML = generateInstrumentPriceChartPane(targetSymbol, asset);
+                const h = portfolio.holdings[sym];
+                if (!h || h.qty < qty) { alert('INSUFFICIENT HOLDINGS'); return; }
+                portfolio.cash += total;
+                h.qty -= qty;
+                if (h.qty === 0) delete portfolio.holdings[sym];
+            }
+            localStorage.setItem('bb_portfolio', JSON.stringify(portfolio));
+            updatePortfolioDisplay();
+        }
+
+        function updatePortfolioDisplay() {
+            document.getElementById('portfolio-cash-lbl').innerText = `$${portfolio.cash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+            const list = document.getElementById('portfolio-positions-list');
+            list.innerHTML = `<span class="text-bbGray font-bold uppercase">PORTFOLIO POSITIONS:</span>`;
+            for (const [sym, h] of Object.entries(portfolio.holdings)) {
+                const price = priceCache[sym]?.price || 0;
+                const val = h.qty * price;
+                list.innerHTML += `<span class="inline-block border border-bbBorder bg-black px-2 py-0.5 rounded text-[10px]"><strong class="text-white">${sym}</strong>: ${h.qty} @ Avg $${h.avgPrice.toFixed(2)} (<span class="${val >= h.qty*h.avgPrice ? 'text-bbGreen' : 'text-bbRed'}">$${val.toLocaleString('en', { maximumFractionDigits: 2 })}</span>)</span>`;
             }
         }
 
-        // =========================================================================
-        // 7. MULTI-SCENARIO TEXTUALLY EMBEDDED DENSITY GENERATION ENGINE
-        // =========================================================================
-        function generateInstrumentPriceChartPane(symbol, asset) {
-            const pointsCount = 22;
-            const seedValue = asset.price;
-            const variance = asset.changePct >= 0 ? 0.01 : -0.01;
-
-            // Build pseudo-deterministic historic tracking bands for visualization array 
-            let chartCurveData = [];
-            for (let i = 0; i < pointsCount; i++) {
-                const multiplier = 1 + (Math.sin(i * 0.8) * 0.04) + (i * variance * 0.003);
-                chartCurveData.push(seedValue * multiplier);
-            }
-            chartCurveData[pointsCount - 1] = asset.price; // force lock real spot terminal price
-
-            const maximumValue = Math.max(...chartCurveData);
-            const minimumValue = Math.min(...chartCurveData);
-            const segmentInterval = (maximumValue - minimumValue) / 6;
-
-            let canvasPlotGraphText = `\n  ${symbol} US Equity  |  Spot Quote: $${formatAssetPrice(asset.price)}  |  Session Delta: ${asset.changePct.toFixed(2)}%\n`;
-            canvasPlotGraphText += `  Historical Terminal Plot Array -- 30 session tracking bounds\n\n`;
-
-            // Draw line tracks
-            for (let row = 5; row >= 0; row--) {
-                const rowTargetPrice = minimumValue + (row * segmentInterval);
-                let textLineStr = `  $${rowTargetPrice.toFixed(2).padEnd(8)} ┤ `;
-
-                for (let col = 0; col < pointsCount; col++) {
-                    const columnValue = chartCurveData[col];
-                    const distanceRatio = Math.abs(columnValue - rowTargetPrice) / segmentInterval;
-
-                    if (distanceRatio < 0.35) {
-                        textLineStr += `■`;
-                    } else if (columnValue > rowTargetPrice) {
-                        textLineStr += `│`;
+        // ==================== WEBSOCKET ====================
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}`);
+            ws.onopen = () => {
+                watchlistSymbols.forEach(sym => ws.send(JSON.stringify({ type: 'subscribe', symbol: sym })));
+            };
+            ws.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                if (data.type === 'trade') {
+                    const sym = data.symbol;
+                    const price = data.price;
+                    if (priceCache[sym]) {
+                        const old = priceCache[sym].price;
+                        priceCache[sym].price = price;
+                        priceCache[sym].change = price - old;
+                        priceCache[sym].changePct = (priceCache[sym].change / old) * 100;
                     } else {
-                        textLineStr += ` `;
+                        priceCache[sym] = { price: price, change: 0, changePct: 0 };
+                    }
+                    if (sym === currentSymbol) updateQuotePanel(priceCache[sym]);
+                    updateWatchlistRow(sym, priceCache[sym]);
+                    const row = document.getElementById(`wst-row-${sym}`);
+                    if (row) {
+                        row.classList.add(priceCache[sym].change >= 0 ? 'tick-up' : 'tick-down');
+                        setTimeout(() => row.classList.remove('tick-up', 'tick-down'), 800);
                     }
                 }
-                canvasPlotGraphText += textLineStr + `\n`;
-            }
-
-            canvasPlotGraphText += `               └────────────────────────────────────────────────────────────\n`;
-            canvasPlotGraphText += `                 T-30 Days      T-20 Days      T-10 Days      SPOT INDEX\n\n`;
-            canvasPlotGraphText += `  SESSION EXTREMES: Day High [$${maximumValue.toFixed(2)}]  |  Day Low [$${minimumValue.toFixed(2)}]\n`;
-            canvasPlotGraphText += `  SUMMARY STATISTICS: Volume Traded [${asset.volume}] | Market Capitalization [${asset.cap}]`;
-
-            return canvasPlotGraphText;
+            };
+            ws.onerror = (err) => console.warn('WebSocket error', err);
         }
 
-        function generateInstrumentDescriptionPane(symbol, asset) {
-            return `
-===============================================================================
-  CORPORATE DESCRIPTION INDEX SUMMARY PROFILE: ${symbol} US EQUITY
-===============================================================================
-ISSUER DESCRIPTION ENGINE:
-  ${asset.name} is classified inside system registers as an institutional focus asset. 
-  Operational workflows cover asset scaling, segment analysis, and macro integrations.
-
-FINANCIAL ANCHORS & SECTOR METRICS (TTM MEASUREMENTS):
-  • Market Cap Size     : ${asset.cap.padEnd(12)} • Price/Earnings Ratio: ${asset.pe !== 'N/A' ? asset.pe + 'x' : 'N/A'}
-  • Liquidity Reserves  : $${asset.cash !== 'N/A' ? asset.cash + 'M' : 'N/A'}     • Total Revenue Pool  : $${asset.revenue !== 'N/A' ? asset.revenue + 'M' : 'N/A'}
-  • Volatility Beta Fit : ${asset.beta.toString().padEnd(12)} • System Health Index : 100% OPERATIONAL
-
-SECURITY CLEARANCE RECONCILIATION DISCLOSURES:
-  Corporate balance sheets reflect valid cash conversions. Default threat calculation is zero.
-  Data transmissions passing safely encrypted over proxy systems.
-===============================================================================`;
-        }
-
-        function generateInstrumentTechnicalAnalysisPane(symbol, asset) {
-            return `
-===============================================================================
-  QUANT TECHNICAL QUANTITATIVE ANALYSIS: ${symbol} US EQUITY
-===============================================================================
-CROSSOVERS & AVERAGES ANALYSIS:
-  • 20-Day Simple Moving Average (SMA)  : $${(asset.price * 0.985).toFixed(2)} (Bullish Support Zone)
-  • 50-Day Exponential Moving Average   : $${(asset.price * 0.952).toFixed(2)}
-  • 200-Day Structural Baseline Anchor  : $${(asset.price * 0.891).toFixed(2)}
-
-MOMENTUM CONSOLE METRICS:
-  • Relative Strength Indicator (RSI-14): 63.45  (Expansion territory)
-  • Moving Average Convergence (MACD)  : +2.14   (Signal Line Validation active)
-  • Bollinger Tracking Bands (Upper)   : $${(asset.price * 1.04).toFixed(2)}
-  • Bollinger Tracking Bands (Lower)   : $${(asset.price * 0.94).toFixed(2)}
-
-VOLUME ANALYSIS DISPATCH:
-  Institutional position scaling indexes indicate steady trend accumulation blocks.
-===============================================================================`;
-        }
-
-        // =========================================================================
-        // 8. BLOOMBERG COPILOT SYSTEM ARTIFICIAL INTELLIGENCE CORE
-        // =========================================================================
-        const copilotSendBtn = document.getElementById('copilot-send-btn');
-        const copilotInput = document.getElementById('copilot-input');
-        const copilotHistory = document.getElementById('copilot-chat-history');
-
-        async function processCopilotQueryRequest() {
-            const queryText = copilotInput.value.trim();
-            if (!queryText) return;
-
-            // Render Prompt Message to Chat Box UI Window Immediately
-            insertChatMessageBubble('user', queryText);
-            copilotInput.value = '';
-
-            // Inject temporary streaming/calculating node framework
-            const resolvingNode = insertChatMessageBubble('system', 'PROCESSING COMPUTE SYNAPSE...');
-
-            // SCENARIO 1: SANDBOX REALTOR CONTEXT LOGIC FALLBACK
-            if (state.isSandboxMode) {
-                setTimeout(() => {
-                    resolvingNode.innerHTML = `<strong class="text-bbCyan block text-[10px]">BLOOMBERG COPILOT SYSTEM (SANDBOX)</strong>${generateMockCopilotResponseText(queryText)}`;
-                    copilotHistory.scrollTop = copilotHistory.scrollHeight;
-                }, 750);
-                return;
-            }
-
-            // SCENARIO 2: LIVE BACKEND CRYPTOGRAPHIC GENERATIVE DISPATCH VIA EXPRESS
-            try {
-                const response = await fetch(`${API_URL}/api/copilot/query`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${state.token}`
-                    },
-                    body: JSON.stringify({ prompt: queryText, activeSymbol: state.activeSymbol })
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.message || "AI gateway processing rejection.");
-
-                resolvingNode.innerHTML = `<strong class="text-bbCyan block text-[10px]">BLOOMBERG COPILOT SYSTEM (LIVE)</strong>${data.response}`;
-            } catch (e) {
-                resolvingNode.innerHTML = `<strong class="text-bbRed block text-[10px]">COPILOT PROCESSING FAULT</strong>Connection matrix compromised or system limit reached. Sandbox failover: "${generateMockCopilotResponseText(queryText)}"`;
-            }
-            copilotHistory.scrollTop = copilotHistory.scrollHeight;
-        }
-
-        function insertChatMessageBubble(sender, txt) {
-            const element = document.createElement('div');
-            if (sender === 'user') {
-                element.className = "bg-[#111111] border border-bbBorder p-2 text-white ml-4 self-end rounded";
-                element.innerHTML = `<strong class="text-bbAmber block text-[10px]">USER NODE</strong>${txt}`;
+        // ==================== COMMAND LINE ====================
+        function processCLI(cmd) {
+            const upper = cmd.trim().toUpperCase();
+            if (upper.startsWith('BUY ') || upper.startsWith('SELL ')) {
+                const parts = upper.split(' ');
+                if (parts.length === 3) {
+                    document.getElementById('trade-symbol').value = parts[1];
+                    document.getElementById('trade-qty').value = parts[2];
+                    executeQuickTrade(parts[0]);
+                } else {
+                    alert("Invalid format. Use: BUY AAPL 10");
+                }
+            } else if (upper === 'HELP') {
+                toggleHelpModal();
+            } else if (upper === 'PORT') {
+                updatePortfolioDisplay();
+            } else if (watchlistSymbols.includes(upper)) {
+                changeActiveSymbol(upper);
             } else {
-                element.className = "bg-black/40 border-l-2 border-bbCyan p-2 text-bbGray mr-4 self-start rounded";
-                element.innerHTML = txt;
+                alert(`Unknown command: ${cmd}. Try AAPL, BUY AAPL 10, PORT, HELP`);
             }
-            copilotHistory.appendChild(element);
-            copilotHistory.scrollTop = copilotHistory.scrollHeight;
-            return element;
         }
 
-        function generateMockCopilotResponseText(prompt) {
-            const upper = prompt.toUpperCase();
-            const currentAsset = state.marketDatabase[state.activeSymbol];
-
-            if (upper.includes('BUY') || upper.includes('TRADE') || upper.includes('PORTFOLIO')) {
-                return `Analyzing portfolio constraints. Current available dry-powder liquidity reserves stand at $${state.portfolio.cash.toFixed(2)}. Suggest utilizing the execution module below the monitor watchlists for zero-slippage trade settling.`;
-            }
-            if (upper.includes('RISK') || upper.includes('BETA') || upper.includes('MARKET')) {
-                return `Macro indicators view ${state.activeSymbol} as maintaining a beta threshold of ${currentAsset.beta}. Market accumulation flags are trending healthy. Structural risk default metrics evaluate as nominal.`;
-            }
-            return `System isolated context keywords for asset portfolio sector [${state.activeSymbol} - ${currentAsset.name}]. Current spot valuation records at $${currentAsset.price.toFixed(2)}. To examine active charts or full descriptive ledgers, execute commands "${state.activeSymbol} GP" or "${state.activeSymbol} DES" respectively inside the master CLI line.`;
+        function toggleHelpModal() {
+            document.getElementById('help-modal').classList.toggle('hidden');
         }
 
-        copilotSendBtn.addEventListener('click', processCopilotQueryRequest);
-        copilotInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') processCopilotQueryRequest(); });
-
-        // =========================================================================
-        // 9. AUTOMATED CLOCK REFRESH PIPELINE TIMERS
-        // =========================================================================
-        function refreshSystemClockTime() {
-            const clockNode = document.getElementById('terminal-clock');
-            const now = new Date();
-            clockNode.textContent = `${now.toISOString().replace('T', ' ').substring(0, 19)} UTC`;
+        function updateClock() {
+            document.getElementById('terminal-clock').innerText = new Date().toUTCString().replace('GMT', 'UTC');
         }
+        setInterval(updateClock, 1000);
+        updateClock();
 
-        // INITIALIZE ENGINES ON LOAD
-        window.addEventListener('DOMContentLoaded', () => {
-            refreshSystemClockTime();
-            setInterval(refreshSystemClockTime, 1000);
-            inspectBackendAvailability();
-        });
+        // ==================== INITIALIZATION ====================
+        window.onload = async () => {
+            initChart();
+            await renderWatchlist();
+            await changeActiveSymbol('AAPL');
+            connectWebSocket();
+            setInterval(() => updatePortfolioDisplay(), 3000);
+            const cli = document.getElementById('terminal-cli');
+            if (cli) {
+                cli.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        processCLI(e.target.value);
+                        e.target.value = '';
+                    }
+                });
+            }
+            document.getElementById('terminal-mode-badge').innerText = 'LIVE DATA';
+        };
     </script>
 </body>
-
 </html>
