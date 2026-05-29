@@ -2,8 +2,8 @@
 <html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Bloomberg Terminal - Live Data</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
+    <title>Financial Terminal - 50 S&P 500 Stocks</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,8 +27,8 @@
                         bbGray: '#a0a0a0'
                     },
                     fontFamily: {
-                        mono: ['"JetBrains Mono"', 'monospace'],
-                        sans: ['Montserrat', 'sans-serif']
+                        sans: ['Montserrat', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace']
                     }
                 }
             }
@@ -43,154 +43,355 @@
         @keyframes tick-down { 0% { background-color: rgba(255, 51, 51, 0.25); } 100% { background-color: transparent; } }
         .tick-up { animation: tick-up 0.8s ease-out; }
         .tick-down { animation: tick-down 0.8s ease-out; }
-        #chart-container { width: 100%; height: 100%; min-height: 400px; display: flex; flex-direction: column; }
+        #chart-container { width: 100%; height: 100%; min-height: 350px; display: flex; flex-direction: column; }
         .watchlist-placeholder { color: #666; text-align: center; padding: 20px; }
         .chart-error { color: #ff8888; text-align: center; padding: 20px; font-family: monospace; background: rgba(255,0,0,0.1); margin: 10px; border-radius: 4px; }
+        .terminal-main {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        button, .watchlist-item, .cursor-pointer {
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        body, .terminal-main, #terminal-workspace {
+            overflow-x: hidden;
+        }
+        #chart-parent-container {
+            min-height: 300px;
+        }
+        @media (max-width: 768px) {
+            .text-xs {
+                font-size: 11px;
+            }
+            .text-sm {
+                font-size: 13px;
+            }
+            .px-4, .p-4 {
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+            }
+        }
+        /* Login overlay styles */
+        .login-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .login-card {
+            background: #0a0a0a;
+            border: 1px solid #282828;
+            border-radius: 8px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 400px;
+        }
+        .login-card input {
+            background: black;
+            border: 1px solid #282828;
+            color: white;
+            padding: 8px;
+            width: 100%;
+            margin-bottom: 12px;
+            border-radius: 4px;
+        }
+        .login-card button {
+            background: #dfb257;
+            color: black;
+            font-weight: bold;
+            padding: 8px;
+            width: 100%;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .login-card .error {
+            color: #ff3333;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        .login-card .switch {
+            text-align: center;
+            margin-top: 12px;
+            cursor: pointer;
+            color: #a0a0a0;
+            font-size: 12px;
+        }
+        .hidden {
+            display: none !important;
+        }
     </style>
 </head>
-<body class="bg-bbBg text-[#e2e2e2] font-mono h-full overflow-hidden select-none flex flex-col">
+<body class="bg-bbBg text-[#e2e2e2] font-sans h-full overflow-hidden select-none flex flex-col">
 
-    <header class="bg-bbHeader border-b border-bbBorder px-4 py-1.5 flex items-center justify-between text-xs shrink-0">
-        <div class="flex items-center space-x-6">
-            <span class="text-bbAmber font-bold tracking-wider text-sm">BLOOMBERG TERMINAL</span>
-            <div class="hidden md:flex space-x-4 text-bbGray">
-                <div>SYS: <span class="text-bbGreen">ONLINE</span></div>
-                <div>SECURITY: <span class="text-bbCyan">SECURE_CLIENT</span></div>
-                <div>STATION: <span class="text-[#ffffff]">BPT-X64</span></div>
-            </div>
+    <!-- LOGIN / REGISTRATION OVERLAY -->
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-card">
+            <h2 class="text-bbAmber font-bold text-xl mb-4 text-center">FINANCIAL TERMINAL</h2>
+            <div id="login-error" class="error"></div>
+            <input type="text" id="login-username" placeholder="Username" autocomplete="off">
+            <input type="password" id="login-password" placeholder="Password">
+            <input type="password" id="login-confirm" placeholder="Confirm Password" style="display: none;">
+            <button id="login-submit">Login</button>
+            <div id="login-switch" class="switch">Don't have an account? Register</div>
         </div>
-        <div class="flex items-center space-x-4">
-            <div id="terminal-mode-badge" class="text-bbAmber font-bold uppercase tracking-wider font-sans bg-amber-950/40 border border-bbAmber/30 px-2.5 py-0.5 rounded-sm">LIVE DATA</div>
-            <div id="terminal-clock" class="text-bbAmber font-bold font-mono">--:--:-- UTC</div>
-            <button onclick="toggleHelpModal()" class="bg-[#1a1a1a] border border-bbBorder px-2 py-0.5 text-bbAmber hover:bg-bbAmber hover:text-black transition duration-150 rounded font-sans">HELP [F1]</button>
-        </div>
-    </header>
+    </div>
 
-    <main class="flex-1 relative overflow-hidden">
-        <div id="terminal-workspace" class="absolute inset-0 grid grid-cols-1 xl:grid-cols-4 p-3 gap-3 opacity-100 transition-opacity duration-300">
-            <!-- LEFT PANEL (unchanged) -->
-            <div class="xl:col-span-1 flex flex-col space-y-3 min-h-0">
-                <div class="bg-bbPanel border border-bbBorder p-2.5 flex flex-col shrink-0">
-                    <div class="text-[10px] text-bbGray mb-1 tracking-wider uppercase font-bold">Interactive Terminal Command System</div>
-                    <div class="flex bg-black border border-bbBorder focus-within:border-bbAmber transition p-1">
-                        <span class="text-bbAmber font-bold px-1.5 flex items-center select-none text-sm">&gt;</span>
-                        <input id="terminal-cli" type="text" class="w-full bg-black text-bbAmber font-bold font-mono text-sm focus:outline-none uppercase py-0.5 px-1" placeholder="Type command (e.g. AAPL, TSLA, PORT, HELP)...">
-                    </div>
-                </div>
+    <!-- MAIN TERMINAL (initially hidden) -->
+    <div id="terminal-interface" class="hidden h-full flex flex-col overflow-hidden">
 
-                <div class="bg-bbPanel border border-bbBorder p-3 flex-1 flex flex-col min-h-0">
-                    <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-2 text-xs shrink-0">
-                        <span class="text-bbAmber font-bold tracking-wider">WATCHLIST (MAG7)</span>
-                        <span class="text-[10px] text-bbGray font-mono">LIVE FEED</span>
-                    </div>
-                    <div class="flex-1 overflow-y-auto pr-0.5" id="watchlist-container">
-                        <div class="watchlist-placeholder">Loading watchlist...</div>
-                    </div>
-                </div>
-
-                <div class="bg-bbPanel border border-bbBorder p-3 shrink-0 flex flex-col">
-                    <div class="border-b border-bbBorder pb-1 mb-2 text-xs flex justify-between items-center">
-                        <span class="text-bbAmber font-bold tracking-wider">PORTFOLIO</span>
-                        <span id="portfolio-cash-lbl" class="text-bbGreen font-bold">$100,000.00</span>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 text-xs mb-2">
-                        <div>
-                            <label class="text-[9px] text-bbGray block">ORDER TCKR</label>
-                            <input id="trade-symbol" type="text" class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none uppercase" placeholder="AAPL">
-                        </div>
-                        <div>
-                            <label class="text-[9px] text-bbGray block">VOLUME SIZE</label>
-                            <input id="trade-qty" type="number" min="1" step="1" class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none" placeholder="10" value="10">
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button onclick="executeQuickTrade('BUY')" class="bg-emerald-950 hover:bg-emerald-800 text-bbGreen border border-bbGreen font-bold py-1.5 transition text-xs">BUY</button>
-                        <button onclick="executeQuickTrade('SELL')" class="bg-red-950 hover:bg-red-900 text-bbRed border border-bbRed font-bold py-1.5 transition text-xs">SELL</button>
-                    </div>
+        <header class="bg-bbHeader border-b border-bbBorder px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+            <div class="flex items-center space-x-3">
+                <span class="text-bbAmber font-bold tracking-wider text-sm">FINANCIAL TERMINAL</span>
+                <div class="hidden sm:flex space-x-3 text-bbGray">
+                    <div>SYS: <span class="text-bbGreen">ONLINE</span></div>
+                    <div>SECURITY: <span class="text-bbCyan">SECURE_CLIENT</span></div>
                 </div>
             </div>
+            <div class="flex items-center space-x-3">
+                <div id="terminal-mode-badge" class="text-bbAmber font-bold uppercase tracking-wider text-[10px] bg-amber-950/40 border border-bbAmber/30 px-2 py-0.5 rounded-sm">LIVE DATA</div>
+                <div id="terminal-clock" class="text-bbAmber font-bold font-mono text-[11px]">--:--:-- UTC</div>
+                <button onclick="toggleHelpModal()" class="bg-[#1a1a1a] border border-bbBorder px-2 py-0.5 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px] font-sans">HELP [F1]</button>
+                <button id="logout-btn" class="bg-[#1a1a1a] border border-bbRed px-2 py-0.5 text-bbRed rounded text-[10px]">LOGOUT</button>
+            </div>
+        </header>
 
-            <!-- RIGHT PANEL: CHART -->
-            <div class="xl:col-span-3 flex flex-col min-h-0">
-                <div class="bg-bbPanel border border-bbBorder p-4 flex flex-col flex-1 min-h-0 relative">
-                    <div class="absolute top-0 left-0 w-24 h-0.5 bg-bbAmber"></div>
-                    <div class="flex items-center justify-between bg-black/60 border border-bbBorder p-2 mb-2 rounded shrink-0">
-                        <div class="flex items-center space-x-3">
-                            <span id="stock-symbol" class="text-xl font-bold text-bbAmber font-mono">AAPL</span>
-                            <span id="stock-name" class="text-xs text-bbGray font-sans">Apple Inc.</span>
+        <main class="flex-1 relative overflow-hidden">
+            <div id="terminal-workspace" class="absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-y-auto terminal-main">
+                <!-- LEFT PANEL: Watchlist + Portfolio -->
+                <div class="lg:col-span-3 flex flex-col space-y-3 min-h-0">
+                    <div class="bg-bbPanel border border-bbBorder p-2.5 flex flex-col shrink-0">
+                        <div class="text-[10px] text-bbGray mb-1 tracking-wider uppercase font-bold">Interactive Terminal Command System</div>
+                        <div class="flex bg-black border border-bbBorder focus-within:border-bbAmber transition p-1">
+                            <span class="text-bbAmber font-bold px-1.5 flex items-center select-none text-sm">&gt;</span>
+                            <input id="terminal-cli" type="text" class="w-full bg-black text-bbAmber font-bold font-mono text-sm focus:outline-none uppercase py-0.5 px-1" placeholder="Type command (e.g. AAPL, TSLA, PORT, HELP)...">
                         </div>
-                        <div class="flex items-center space-x-4">
-                            <span id="stock-price" class="text-lg font-bold text-bbGreen font-mono">---</span>
-                            <div class="flex flex-col items-end leading-none font-mono">
-                                <span id="stock-change" class="text-xs text-bbGreen font-bold">---</span>
-                                <span id="stock-change-pct" class="text-[9px] text-bbGreen">---</span>
+                    </div>
+
+                    <div class="bg-bbPanel border border-bbBorder p-3 flex-1 flex flex-col min-h-0">
+                        <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-2 text-xs shrink-0">
+                            <span class="text-bbAmber font-bold tracking-wider">WATCHLIST (50 S&P 500)</span>
+                            <span class="text-[10px] text-bbGray font-mono">LIVE FEED</span>
+                        </div>
+                        <div class="flex-1 overflow-y-auto pr-0.5" id="watchlist-container">
+                            <div class="watchlist-placeholder">Loading 50 symbols...</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-bbPanel border border-bbBorder p-3 shrink-0 flex flex-col">
+                        <div class="border-b border-bbBorder pb-1 mb-2 text-xs flex justify-between items-center">
+                            <span class="text-bbAmber font-bold tracking-wider">PORTFOLIO</span>
+                            <span id="portfolio-cash-lbl" class="text-bbGreen font-bold">$100,000.00</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs mb-2">
+                            <div>
+                                <label class="text-[9px] text-bbGray block">ORDER TCKR</label>
+                                <input id="trade-symbol" type="text" class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none uppercase text-sm" placeholder="AAPL">
+                            </div>
+                            <div>
+                                <label class="text-[9px] text-bbGray block">VOLUME SIZE</label>
+                                <input id="trade-qty" type="number" min="1" step="1" class="w-full bg-black border border-bbBorder px-2 py-1 text-bbCyan focus:outline-none text-sm" placeholder="10" value="10">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="executeQuickTrade('BUY')" class="bg-emerald-950 hover:bg-emerald-800 text-bbGreen border border-bbGreen font-bold py-1.5 transition text-xs rounded touch-manipulation">BUY</button>
+                            <button onclick="executeQuickTrade('SELL')" class="bg-red-950 hover:bg-red-900 text-bbRed border border-bbRed font-bold py-1.5 transition text-xs rounded touch-manipulation">SELL</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CENTER PANEL: CHART -->
+                <div class="lg:col-span-6 flex flex-col min-h-0">
+                    <div class="bg-bbPanel border border-bbBorder p-3 md:p-4 flex flex-col flex-1 min-h-0 relative">
+                        <div class="absolute top-0 left-0 w-16 h-0.5 bg-bbAmber"></div>
+                        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-black/60 border border-bbBorder p-2 mb-2 rounded shrink-0 gap-2">
+                            <div class="flex items-center space-x-3">
+                                <span id="stock-symbol" class="text-xl font-bold text-bbAmber font-mono">AAPL</span>
+                                <span id="stock-name" class="text-xs text-bbGray font-sans truncate">Apple Inc.</span>
+                            </div>
+                            <div class="flex items-center space-x-4">
+                                <span id="stock-price" class="text-lg font-bold text-bbGreen font-mono">---</span>
+                                <div class="flex flex-col items-end leading-none font-mono">
+                                    <span id="stock-change" class="text-xs text-bbGreen font-bold">---</span>
+                                    <span id="stock-change-pct" class="text-[9px] text-bbGreen">---</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap justify-between items-center border-b border-bbBorder pb-1 mb-3 text-xs shrink-0 gap-2">
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-block w-2 h-2 rounded-full bg-bbAmber animate-pulse"></span>
+                                <span class="text-bbAmber font-bold tracking-wider uppercase text-[11px]">CHART</span>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-1">
+                                <button onclick="changeInterval('1D')" id="btn-1D" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">1D</button>
+                                <button onclick="changeInterval('1W')" id="btn-1W" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">1W</button>
+                                <button onclick="changeInterval('1M')" id="btn-1M" class="px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold font-sans text-[10px]">1M</button>
+                                <button onclick="changeInterval('3M')" id="btn-3M" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">3M</button>
+                                <label class="flex items-center gap-1 text-[10px] ml-1 cursor-pointer">
+                                    <input type="checkbox" id="line-mode-toggle" onchange="toggleChartType()"> Line
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 w-full min-h-[300px] h-full relative rounded overflow-hidden bg-black" id="chart-parent-container">
+                            <div id="chart-container" class="w-full h-full"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT PANEL: AI COPILOT -->
+                <div class="lg:col-span-3 flex flex-col min-h-0">
+                    <div class="bg-bbPanel border border-bbBorder p-3 flex flex-col flex-1 min-h-0 relative">
+                        <div class="absolute top-0 right-0 w-16 h-0.5 bg-bbCyan"></div>
+                        <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-2 text-xs shrink-0">
+                            <span class="text-bbCyan font-bold tracking-wider">AI COPILOT</span>
+                            <span class="text-[9px] bg-cyan-950 text-bbCyan px-1.5 py-0.5 rounded font-bold font-sans">GEMINI</span>
+                        </div>
+                        <div id="copilot-chat" class="flex-1 overflow-y-auto pr-1 mb-3 space-y-3 text-xs flex flex-col select-text">
+                            <div class="bg-black/40 border-l-2 border-bbCyan p-2 text-bbGray">
+                                <strong class="text-bbCyan block text-[10px]">SYSTEM</strong>
+                                Gemini AI active. Ask about market trends, technical analysis, or fundamentals.
+                            </div>
+                        </div>
+                        <div class="mt-auto shrink-0 border-t border-bbBorder/40 pt-2">
+                            <div class="flex bg-black border border-bbBorder focus-within:border-bbCyan transition rounded overflow-hidden">
+                                <input id="copilot-input" type="text" class="w-full bg-black text-bbCyan font-mono text-xs focus:outline-none p-2" placeholder="Ask Gemini about the market...">
+                                <button id="copilot-send-btn" onclick="sendCopilotMessage()" class="bg-cyan-950 hover:bg-cyan-900 border-l border-bbBorder px-3 text-bbCyan text-xs transition font-bold font-sans">SEND</button>
                             </div>
                         </div>
                     </div>
-
-                    <div class="flex justify-between items-center border-b border-bbBorder pb-1 mb-3 text-xs shrink-0 flex-wrap gap-2">
-                        <div class="flex items-center space-x-2">
-                            <span class="inline-block w-2 h-2 rounded-full bg-bbAmber animate-pulse"></span>
-                            <span class="text-bbAmber font-bold tracking-wider uppercase">CHART</span>
-                        </div>
-                        <div class="flex items-center space-x-2">
-                            <button onclick="changeInterval('1D')" id="btn-1D" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">1D</button>
-                            <button onclick="changeInterval('1W')" id="btn-1W" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">1W</button>
-                            <button onclick="changeInterval('1M')" id="btn-1M" class="px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold font-sans text-[10px]">1M</button>
-                            <button onclick="changeInterval('3M')" id="btn-3M" class="px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded font-sans text-[10px]">3M</button>
-                            <label class="flex items-center gap-1 text-[10px] ml-2 cursor-pointer">
-                                <input type="checkbox" id="line-mode-toggle" onchange="toggleChartType()"> Line
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="flex-1 w-full min-h-[350px] h-full relative rounded overflow-hidden bg-black" id="chart-parent-container">
-                        <div id="chart-container" class="w-full h-full"></div>
-                    </div>
                 </div>
             </div>
-        </div>
-    </main>
+        </main>
 
-    <footer class="bg-bbHeader border-t border-bbBorder p-2 text-[11px] shrink-0 overflow-x-auto whitespace-nowrap">
-        <div class="flex items-center space-x-4 font-mono" id="portfolio-positions-list">
-            <span class="text-bbGray font-bold uppercase">PORTFOLIO POSITIONS:</span>
-        </div>
-    </footer>
+        <footer class="bg-bbHeader border-t border-bbBorder p-2 text-[11px] shrink-0 overflow-x-auto whitespace-nowrap">
+            <div class="flex items-center space-x-4 font-mono" id="portfolio-positions-list">
+                <span class="text-bbGray font-bold uppercase">PORTFOLIO POSITIONS:</span>
+            </div>
+        </footer>
 
-    <div id="help-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4">
-        <div class="bg-bbPanel border-2 border-bbBorder w-full max-w-lg p-5 rounded shadow-2xl relative">
-            <h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-bbBorder pb-1 flex justify-between items-center">
-                <span>COMMAND DIRECTORY</span>
-                <button onclick="toggleHelpModal()" class="text-bbGray hover:text-bbRed">✖</button>
-            </h2>
-            <div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] font-mono text-neutral-300">
-                <p class="text-bbGray mb-2">Enter commands in the header bar & press Enter.</p>
-                <table class="w-full text-left">
-                    <thead><tr class="text-bbGray border-b border-bbBorder"><th>COMMAND</th><th>ACTION</th></td></thead>
-                    <tbody>
-                        <tr><td class="text-bbAmber">AAPL</td><td>Switch focus to Apple</td></tr>
-                        <tr><td class="text-bbAmber">TSLA</td><td>Switch focus to Tesla</td></tr>
-                        <tr><td class="text-bbAmber">BUY AAPL 10</td><td>Buy 10 shares of AAPL</td></tr>
-                        <tr><td class="text-bbAmber">SELL TSLA 5</td><td>Sell 5 shares of TSLA</td></tr>
-                        <tr><td class="text-bbAmber">PORT</td><td>Show portfolio</td></tr>
-                        <tr><td class="text-bbAmber">HELP</td><td>This menu</td></tr>
-                    </tbody>
-                </table>
+        <div id="help-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4">
+            <div class="bg-bbPanel border-2 border-bbBorder w-full max-w-lg p-5 rounded shadow-2xl relative">
+                <h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-bbBorder pb-1 flex justify-between items-center">
+                    <span>COMMAND DIRECTORY</span>
+                    <button onclick="toggleHelpModal()" class="text-bbGray hover:text-bbRed">✖</button>
+                </h2>
+                <div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] font-mono text-neutral-300">
+                    <p class="text-bbGray mb-2">Enter commands in the header bar & press Enter.</p>
+                    <table class="w-full text-left">
+                        <thead><tr class="text-bbGray border-b border-bbBorder"><th>COMMAND</th><th>ACTION</th></table></thead>
+                        <tbody>
+                            <tr><td class="text-bbAmber">AAPL</td><td>Switch focus to Apple</td></tr>
+                            <tr><td class="text-bbAmber">TSLA</td><td>Switch focus to Tesla</td></tr>
+                            <tr><td class="text-bbAmber">BUY AAPL 10</td><td>Buy 10 shares of AAPL</td></tr>
+                            <tr><td class="text-bbAmber">SELL TSLA 5</td><td>Sell 5 shares of TSLA</td></tr>
+                            <tr><td class="text-bbAmber">PORT</td><td>Show portfolio</td></tr>
+                            <tr><td class="text-bbAmber">HELP</td><td>This menu</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // ==================== CONFIGURATION ====================
+        // ==================== AUTHENTICATION ====================
+        let authToken = null;
+        let currentUser = null;
+
+        const loginOverlay = document.getElementById('login-overlay');
+        const terminalInterface = document.getElementById('terminal-interface');
+        const loginError = document.getElementById('login-error');
+        const loginUsername = document.getElementById('login-username');
+        const loginPassword = document.getElementById('login-password');
+        const loginConfirm = document.getElementById('login-confirm');
+        const loginSubmit = document.getElementById('login-submit');
+        const loginSwitch = document.getElementById('login-switch');
+        let isLoginMode = true;
+
+        function setAuthMode(login) {
+            isLoginMode = login;
+            if (login) {
+                loginConfirm.style.display = 'none';
+                loginSubmit.innerText = 'Login';
+                loginSwitch.innerText = "Don't have an account? Register";
+            } else {
+                loginConfirm.style.display = 'block';
+                loginSubmit.innerText = 'Register';
+                loginSwitch.innerText = "Already have an account? Login";
+            }
+            loginError.innerText = '';
+        }
+
+        loginSwitch.onclick = () => setAuthMode(!isLoginMode);
+
+        loginSubmit.onclick = async () => {
+            const username = loginUsername.value.trim();
+            const password = loginPassword.value;
+            const confirm = loginConfirm.value;
+            if (!username || !password) {
+                loginError.innerText = 'Username and password required';
+                return;
+            }
+            if (!isLoginMode && password !== confirm) {
+                loginError.innerText = 'Passwords do not match';
+                return;
+            }
+            const endpoint = isLoginMode ? '/api/auth/login' : '/api/auth/register';
+            try {
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Authentication failed');
+                if (isLoginMode) {
+                    authToken = data.token;
+                    currentUser = data.username;
+                    // Portfolio is stored in backend; we'll load it into global portfolio variable
+                    window.portfolio = data.portfolio || { cash: 100000, holdings: {} };
+                    loginOverlay.classList.add('hidden');
+                    terminalInterface.classList.remove('hidden');
+                    initTerminal();
+                } else {
+                    loginError.innerText = 'Registration successful! Please login.';
+                    setAuthMode(true);
+                    loginPassword.value = '';
+                    loginConfirm.value = '';
+                }
+            } catch (err) {
+                loginError.innerText = err.message;
+            }
+        };
+
+        // Logout button
+        document.getElementById('logout-btn').onclick = () => {
+            authToken = null;
+            currentUser = null;
+            terminalInterface.classList.add('hidden');
+            loginOverlay.classList.remove('hidden');
+            loginUsername.value = '';
+            loginPassword.value = '';
+            loginConfirm.value = '';
+            setAuthMode(true);
+        };
+
+        // ==================== TERMINAL GLOBALS ====================
         const FINNHUB_PROXY = '/api/finnhub?endpoint=';
         const YAHOO_PROXY = '/api/yahoo?';
         const ALPHA_VANTAGE_PROXY = '/api/alphavantage?function=TIME_SERIES_DAILY&symbol=';
         const TWELVE_DATA_PROXY = '/api/twelvedata?';
+        const GEMINI_PROXY = '/api/copilot/query';
         
-        // Cache expiration (1 hour)
         const CACHE_TTL = 60 * 60 * 1000;
-
         let currentSymbol = 'AAPL';
         let currentInterval = '1M';
         let chart = null;
@@ -200,10 +401,27 @@
         let isLineMode = false;
         let ws = null;
         let priceCache = {};
-        let watchlistSymbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META'];
-        let portfolio = JSON.parse(localStorage.getItem('bb_portfolio')) || { cash: 100000.00, holdings: {} };
+        let watchlistSymbols = [
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'JPM', 'JNJ',
+            'V', 'PG', 'UNH', 'HD', 'DIS', 'MA', 'BAC', 'NFLX', 'ADBE', 'CRM',
+            'KO', 'PEP', 'TMO', 'COST', 'ABT', 'DHR', 'WMT', 'NKE', 'CVX', 'MRK',
+            'ABBV', 'LLY', 'AVGO', 'TXN', 'QCOM', 'AMGN', 'SBUX', 'LOW', 'UPS', 'GE',
+            'IBM', 'CAT', 'GS', 'MS', 'C', 'PLD', 'SPGI', 'BLK', 'T', 'VZ'
+        ];
+        let portfolio = { cash: 100000.00, holdings: {} };
 
-        // Helper: fetch with timeout
+        // Rate limiting for AI
+        const RATE_LIMIT_COUNT = 3;
+        const RATE_LIMIT_WINDOW = 60000;
+        let aiTimestamps = [];
+
+        function isRateLimited() {
+            const now = Date.now();
+            aiTimestamps = aiTimestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW);
+            return aiTimestamps.length >= RATE_LIMIT_COUNT;
+        }
+
+        // ==================== API HELPERS ====================
         async function fetchWithTimeout(url, timeoutMs = 8000) {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -215,29 +433,6 @@
                 clearTimeout(timeout);
                 throw err;
             }
-        }
-
-        // ==================== CACHING HELPERS ====================
-        function getCachedCandles(symbol, days) {
-            const key = `candles_${symbol}_${days}`;
-            const cached = localStorage.getItem(key);
-            if (cached) {
-                const { timestamp, data } = JSON.parse(cached);
-                if (Date.now() - timestamp < CACHE_TTL) {
-                    console.log(`Using cached candles for ${symbol} (${days}d)`);
-                    return data;
-                }
-            }
-            return null;
-        }
-
-        function setCachedCandles(symbol, days, candles) {
-            const key = `candles_${symbol}_${days}`;
-            const cacheEntry = {
-                timestamp: Date.now(),
-                data: candles
-            };
-            localStorage.setItem(key, JSON.stringify(cacheEntry));
         }
 
         // ==================== QUOTE (Finnhub) ====================
@@ -261,9 +456,7 @@
                     if (symbol === currentSymbol) updateQuotePanel(priceCache[symbol]);
                     return priceCache[symbol];
                 }
-            } catch(e) {
-                console.warn(`Quote fail for ${symbol}`, e);
-            }
+            } catch(e) { console.warn(`Quote fail for ${symbol}`, e); }
             return null;
         }
 
@@ -281,9 +474,23 @@
             changePctEl.className = `${cls} text-[10px] font-mono`;
         }
 
-        // ==================== CANDLES (Yahoo Finance primary + fallbacks) ====================
+        // ==================== CANDLES (Yahoo + fallbacks) ====================
+        function getCachedCandles(symbol, days) {
+            const key = `candles_${symbol}_${days}`;
+            const cached = localStorage.getItem(key);
+            if (cached) {
+                const { timestamp, data } = JSON.parse(cached);
+                if (Date.now() - timestamp < CACHE_TTL) return data;
+            }
+            return null;
+        }
+
+        function setCachedCandles(symbol, days, candles) {
+            const key = `candles_${symbol}_${days}`;
+            localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data: candles }));
+        }
+
         async function loadHistorical(symbol, days) {
-            // Map days to Yahoo Finance range
             let range = '1mo';
             if (days <= 1) range = '1d';
             else if (days <= 7) range = '5d';
@@ -292,25 +499,21 @@
             else if (days <= 186) range = '6mo';
             else range = '1y';
             
-            // Try cache first
             const cached = getCachedCandles(symbol, days);
             if (cached) return cached;
             
-            // Try Yahoo Finance
             const yahooUrl = `${YAHOO_PROXY}symbol=${symbol}&interval=1d&range=${range}`;
             try {
-                console.log(`Fetching candles from Yahoo for ${symbol} (${range})`);
                 const res = await fetchWithTimeout(yahooUrl, 10000);
                 const json = await res.json();
                 if (json.success && json.data && json.data.length) {
                     let candles = json.data.slice(-days);
                     setCachedCandles(symbol, days, candles);
-                    console.log(`Yahoo success: ${candles.length} candles for ${symbol}`);
                     return candles;
                 }
                 throw new Error('No data from Yahoo');
             } catch (err) {
-                console.warn(`Yahoo failed for ${symbol}, trying fallbacks`, err);
+                console.warn(`Yahoo failed for ${symbol}`, err);
                 // Fallback to Alpha Vantage
                 try {
                     const alphaUrl = `${ALPHA_VANTAGE_PROXY}${symbol}&outputsize=compact`;
@@ -332,7 +535,7 @@
                     }
                     throw new Error('No Alpha Vantage data');
                 } catch (alphaErr) {
-                    console.warn(`Alpha Vantage failed for ${symbol}, trying Twelve Data`);
+                    console.warn(`Alpha Vantage failed for ${symbol}`, alphaErr);
                     // Fallback to Twelve Data
                     try {
                         const twelveUrl = `${TWELVE_DATA_PROXY}symbol=${symbol}&interval=1day&outputsize=${Math.min(days, 100)}`;
@@ -402,9 +605,7 @@
             });
             chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
             lineSeries = chart.addLineSeries({ color: '#dfb257', lineWidth: 2, priceLineVisible: false });
-            if (lineSeries && typeof lineSeries.setVisible === 'function') {
-                lineSeries.setVisible(false);
-            }
+            if (lineSeries && typeof lineSeries.setVisible === 'function') lineSeries.setVisible(false);
             const resizeObserver = new ResizeObserver(() => {
                 if (chart) {
                     const newWidth = parent.clientWidth;
@@ -424,9 +625,9 @@
                 if (lineSeries && typeof lineSeries.setData === 'function') {
                     lineSeries.setData(candles.map(c => ({ time: c.time, value: c.close })));
                 }
-                if (candleSeries && lineSeries && typeof candleSeries.setVisible === 'function' && typeof lineSeries.setVisible === 'function') {
-                    candleSeries.setVisible(!isLineMode);
-                    lineSeries.setVisible(isLineMode);
+                if (candleSeries && lineSeries) {
+                    if (typeof candleSeries.setVisible === 'function') candleSeries.setVisible(!isLineMode);
+                    if (typeof lineSeries.setVisible === 'function') lineSeries.setVisible(isLineMode);
                 }
                 chart.timeScale().fitContent();
                 const errorDiv = document.querySelector('#chart-container .chart-error');
@@ -448,22 +649,21 @@
 
         function toggleChartType() {
             isLineMode = document.getElementById('line-mode-toggle').checked;
-            if (candleSeries && lineSeries && typeof candleSeries.setVisible === 'function' && typeof lineSeries.setVisible === 'function') {
-                candleSeries.setVisible(!isLineMode);
-                lineSeries.setVisible(isLineMode);
+            if (candleSeries && lineSeries) {
+                if (typeof candleSeries.setVisible === 'function') candleSeries.setVisible(!isLineMode);
+                if (typeof lineSeries.setVisible === 'function') lineSeries.setVisible(isLineMode);
             }
         }
 
-        // ==================== WATCHLIST (parallel loading) ====================
+        // ==================== WATCHLIST ====================
         async function renderWatchlist() {
             const container = document.getElementById('watchlist-container');
-            container.innerHTML = '<div class="watchlist-placeholder">Loading watchlist...</div>';
-            
+            container.innerHTML = '<div class="watchlist-placeholder">Loading 50 symbols...</div>';
             const table = document.createElement('table');
             table.className = "w-full text-left text-xs font-mono";
             table.innerHTML = `<thead><tr class="text-bbGray text-[10px] border-b border-bbBorder/40">
                 <th class="pb-1">SYMBOL</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th>
-            </tr></thead><tbody id="watchlist-tbody"></tbody>`;
+            </table></thead><tbody id="watchlist-tbody"></tbody>`;
             container.innerHTML = '';
             container.appendChild(table);
             const tbody = document.getElementById('watchlist-tbody');
@@ -477,7 +677,7 @@
                 const isUp = data.change >= 0;
                 const tr = document.createElement('tr');
                 tr.id = `wst-row-${sym}`;
-                tr.className = "border-b border-bbBorder/20 hover:bg-white/5 cursor-pointer transition py-1 font-mono";
+                tr.className = "border-b border-bbBorder/20 hover:bg-white/5 cursor-pointer transition py-1 font-mono touch-manipulation";
                 tr.onclick = () => changeActiveSymbol(sym);
                 tr.innerHTML = `
                     <td class="py-1.5 font-bold text-white">${sym}</td>
@@ -535,7 +735,7 @@
             loadChartData(currentSymbol, days);
         }
 
-        // ==================== PORTFOLIO & TRADING ====================
+        // ==================== PORTFOLIO ====================
         function executeQuickTrade(action) {
             const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
             const qty = parseFloat(document.getElementById('trade-qty').value);
@@ -575,9 +775,7 @@
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}`);
-            ws.onopen = () => {
-                watchlistSymbols.forEach(sym => ws.send(JSON.stringify({ type: 'subscribe', symbol: sym })));
-            };
+            ws.onopen = () => { watchlistSymbols.forEach(sym => ws.send(JSON.stringify({ type: 'subscribe', symbol: sym }))); };
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.type === 'trade') {
@@ -594,13 +792,51 @@
                     if (sym === currentSymbol) updateQuotePanel(priceCache[sym]);
                     updateWatchlistRow(sym, priceCache[sym]);
                     const row = document.getElementById(`wst-row-${sym}`);
-                    if (row) {
-                        row.classList.add(priceCache[sym].change >= 0 ? 'tick-up' : 'tick-down');
-                        setTimeout(() => row.classList.remove('tick-up', 'tick-down'), 800);
-                    }
+                    if (row) row.classList.add(priceCache[sym].change >= 0 ? 'tick-up' : 'tick-down');
+                    setTimeout(() => row && row.classList.remove('tick-up', 'tick-down'), 800);
                 }
             };
             ws.onerror = (err) => console.warn('WebSocket error', err);
+        }
+
+        // ==================== AI COPILOT (Gemini - FIXED) ====================
+        function appendCopilotMessage(sender, text, colorClass = '') {
+            const chat = document.getElementById('copilot-chat');
+            const div = document.createElement('div');
+            div.className = `p-2 rounded ${colorClass} bg-neutral-900/50 mb-1`;
+            div.innerHTML = `<strong class="text-bbCyan block text-[10px]">${sender}</strong><div class="whitespace-pre-wrap">${text}</div>`;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function sendCopilotMessage() {
+            const input = document.getElementById('copilot-input');
+            const prompt = input.value.trim();
+            if (!prompt) return;
+            if (isRateLimited()) {
+                appendCopilotMessage('SYSTEM', 'Rate limit (3 queries per minute). Please wait.', 'text-bbRed');
+                return;
+            }
+            aiTimestamps.push(Date.now());
+            appendCopilotMessage('YOU', prompt, 'text-bbAmber');
+            input.value = '';
+            try {
+                // Use gemini-2.0-flash-lite (free, fast) and v1beta for better compatibility
+                const res = await fetch(GEMINI_PROXY, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })  // No systemInstruction
+                });
+                const data = await res.json();
+                if (data.text) {
+                    appendCopilotMessage('GEMINI', data.text, 'text-bbCyan');
+                } else {
+                    appendCopilotMessage('ERROR', data.error || 'No response from Gemini.', 'text-bbRed');
+                }
+            } catch (err) {
+                console.error(err);
+                appendCopilotMessage('ERROR', 'Failed to reach Gemini proxy. Ensure backend is running and GEMINI_API_KEY is set in .env', 'text-bbRed');
+            }
         }
 
         // ==================== COMMAND LINE ====================
@@ -612,48 +848,36 @@
                     document.getElementById('trade-symbol').value = parts[1];
                     document.getElementById('trade-qty').value = parts[2];
                     executeQuickTrade(parts[0]);
-                } else {
-                    alert("Invalid format. Use: BUY AAPL 10");
-                }
-            } else if (upper === 'HELP') {
-                toggleHelpModal();
-            } else if (upper === 'PORT') {
-                updatePortfolioDisplay();
-            } else if (watchlistSymbols.includes(upper)) {
-                changeActiveSymbol(upper);
-            } else {
-                alert(`Unknown command: ${cmd}. Try AAPL, BUY AAPL 10, PORT, HELP`);
-            }
+                } else alert("Invalid format. Use: BUY AAPL 10");
+            } else if (upper === 'HELP') toggleHelpModal();
+            else if (upper === 'PORT') updatePortfolioDisplay();
+            else if (watchlistSymbols.includes(upper)) changeActiveSymbol(upper);
+            else alert(`Unknown command: ${cmd}. Try AAPL, BUY AAPL 10, PORT, HELP`);
         }
 
-        function toggleHelpModal() {
-            document.getElementById('help-modal').classList.toggle('hidden');
+        function toggleHelpModal() { 
+            const modal = document.getElementById('help-modal');
+            modal.classList.toggle('hidden');
         }
-
-        function updateClock() {
+        function updateClock() { 
             document.getElementById('terminal-clock').innerText = new Date().toUTCString().replace('GMT', 'UTC');
         }
         setInterval(updateClock, 1000);
         updateClock();
 
         // ==================== INITIALIZATION ====================
-        window.onload = async () => {
+        async function initTerminal() {
             initChart();
             await renderWatchlist();
             await changeActiveSymbol('AAPL');
             connectWebSocket();
             setInterval(() => updatePortfolioDisplay(), 3000);
             const cli = document.getElementById('terminal-cli');
-            if (cli) {
-                cli.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
-                        processCLI(e.target.value);
-                        e.target.value = '';
-                    }
-                });
-            }
+            if (cli) cli.addEventListener('keydown', (e) => { if (e.key === 'Enter') { processCLI(e.target.value); e.target.value = ''; } });
             document.getElementById('terminal-mode-badge').innerText = 'LIVE DATA';
-        };
+        }
+
+        // Start with login overlay (terminal hidden)
     </script>
 </body>
 </html>

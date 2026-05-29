@@ -1,13 +1,13 @@
 /**
- * BLOOMBERG TERMINAL SECURE BACKEND GATEWAY
- * Provides API proxies for Finnhub (quotes), Yahoo Finance (candles),
- * and fallbacks (Alpha Vantage, Twelve Data).
+ * FINANCIAL TERMINAL SECURE BACKEND GATEWAY
  */
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const WebSocket = require('ws');
+const OpenAI = require('openai');
+const rateLimit = require('express-rate-limit');
 const db = require('./database');
 
 const app = express();
@@ -17,7 +17,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// ==================== AUTHENTICATION (kept for compatibility) ====================
+// ==================== AUTHENTICATION ====================
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -26,7 +26,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
     const users = db.getUsers();
     if (users.find(u => u.username.toLowerCase() === username.toLowerCase()))
-        return res.status(409).json({ error: 'Username taken' });
+        return res.status(409).json({ error: 'Username already taken' });
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     db.saveUser({ username, password: hashedPassword, portfolio: { cash: 100000, holdings: {} }, created_at: new Date().toISOString() });
@@ -55,7 +55,7 @@ app.post('/api/portfolio/sync', (req, res) => {
     } catch(e) { res.status(403).json({ error: 'Invalid token' }); }
 });
 
-// ==================== FINNHUB PROXY (quotes, profile) ====================
+// ==================== PROXIES ====================
 app.get('/api/finnhub', async (req, res) => {
     const endpoint = req.query.endpoint;
     if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });
@@ -71,11 +71,9 @@ app.get('/api/finnhub', async (req, res) => {
     }
 });
 
-// ==================== YAHOO FINANCE PROXY (fast, free candles) ====================
 app.get('/api/yahoo', async (req, res) => {
     const { symbol, interval, range } = req.query;
     if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
-    // Default to daily candles, range based on days
     const yahooInterval = interval || '1d';
     const yahooRange = range || '1mo';
     try {
@@ -103,7 +101,6 @@ app.get('/api/yahoo', async (req, res) => {
     }
 });
 
-// ==================== ALPHA VANTAGE PROXY (fallback) ====================
 app.get('/api/alphavantage', async (req, res) => {
     const { function: func, symbol, outputsize } = req.query;
     if (!func || !symbol) return res.status(400).json({ error: 'Missing parameters' });
@@ -119,7 +116,6 @@ app.get('/api/alphavantage', async (req, res) => {
     }
 });
 
-// ==================== TWELVE DATA PROXY (fallback) ====================
 app.get('/api/twelvedata', async (req, res) => {
     const { symbol, interval, outputsize } = req.query;
     if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
@@ -135,10 +131,54 @@ app.get('/api/twelvedata', async (req, res) => {
     }
 });
 
-// ==================== WEB SOCKET SERVER (real-time trades via Finnhub) ====================
+// ==================== GROQ AI PROXY WITH RATE LIMITER ====================
+const groqClient = new OpenAI({
+    baseURL: 'https://api.groq.com/openai/v1',
+    apiKey: process.env.GROQ_API_KEY,
+});
+
+// Rate limiter: max 10 requests per minute per IP
+const aiRateLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10,              // limit each IP to 10 requests per windowMs
+    message: { error: 'Too many AI requests. Please wait a moment.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+app.post('/api/copilot/query', aiRateLimiter, async (req, res) => {
+    const { prompt } = req.body;
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+        return res.status(503).json({ error: 'Groq API key not configured in .env' });
+    }
+    try {
+        const completion = await groqClient.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a financial AI assistant. Answer questions about markets, stocks, and trading. Be concise and factual.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            stream: false,
+        });
+        const text = completion.choices[0]?.message?.content || 'No response from Groq.';
+        res.json({ text });
+    } catch (err) {
+        console.error('Groq proxy error:', err);
+        res.status(500).json({ error: 'Groq proxy internal error' });
+    }
+});
+
+// ==================== WEBSOCKET ====================
 const server = app.listen(PORT, () => {
     console.log(`============================================================`);
-    console.log(`  BLOOMBERG TERMINAL SYSTEM ACTIVE ON PORT ${PORT}`);
+    console.log(`  FINANCIAL TERMINAL SYSTEM ACTIVE ON PORT ${PORT}`);
     console.log(`  ACCESS AT: http://localhost:${PORT}`);
     console.log(`============================================================`);
 });
