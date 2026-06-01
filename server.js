@@ -1,6 +1,6 @@
 /**
  * FINANCIAL TERMINAL SECURE BACKEND GATEWAY
- * Now includes Yahoo quote proxy for reliable symbol data.
+ * Fixed Yahoo quote proxy with proper headers and improved fallback.
  */
 require('dotenv').config();
 const express = require('express');
@@ -81,7 +81,13 @@ app.get('/api/yahoo', async (req, res) => {
     const yahooRange = range || '1mo';
     try {
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${yahooInterval}&range=${yahooRange}`;
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+        });
         const data = await response.json();
         if (data && data.chart && data.chart.result && data.chart.result[0]) {
             const result = data.chart.result[0];
@@ -104,18 +110,27 @@ app.get('/api/yahoo', async (req, res) => {
     }
 });
 
-// Yahoo Finance real‑time quote (for watchlist)
+// Yahoo Finance real‑time quote (for watchlist) – FIXED with headers
 app.get('/api/yahoo/quote', async (req, res) => {
     const { symbol } = req.query;
     if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
     try {
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+        });
         const data = await response.json();
         if (data && data.chart && data.chart.result && data.chart.result[0]) {
             const result = data.chart.result[0];
             const quote = result.indicators.quote[0];
             const closes = quote.close;
+            if (!closes || closes.length < 2) {
+                return res.status(404).json({ error: 'Not enough data' });
+            }
             const lastClose = closes[closes.length - 1];
             const previousClose = closes[closes.length - 2] || lastClose;
             const price = lastClose;
@@ -126,6 +141,7 @@ app.get('/api/yahoo/quote', async (req, res) => {
             res.status(404).json({ error: 'No data from Yahoo' });
         }
     } catch (err) {
+        console.error('Yahoo quote error:', err);
         res.status(502).json({ error: 'Yahoo quote proxy error' });
     }
 });
