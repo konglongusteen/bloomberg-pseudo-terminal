@@ -6,8 +6,8 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const WebSocket = require('ws');
 
-// Import MongoDB helpers (from your existing database.js)
-const { getUsers, saveUser, updateUserPortfolio, connectDb } = require('./database');
+// Import MongoDB helpers
+const { getUsers, saveUser, updateUserPortfolio } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,8 +15,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-// Ensure DB connection on startup (optional, but good for logging)
-connectDb().catch(console.error);
+// Helper: Convert dot symbol to Yahoo format (BRK.B -> BRK-B)
+function toYahooSymbol(symbol) {
+  return symbol.replace(/\./g, '-');
+}
 
 app.use(cors());
 app.use(express.json());
@@ -90,7 +92,7 @@ app.post('/api/portfolio/sync', authenticate, async (req, res) => {
   else res.status(500).json({ error: 'Sync failed' });
 });
 
-// ---------- Yahoo Finance (unchanged) ----------
+// ---------- Yahoo Finance (with symbol fix) ----------
 const yahooHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   'Accept': 'application/json'
@@ -99,8 +101,9 @@ const yahooHeaders = {
 app.get('/api/yahoo', async (req, res) => {
   const { symbol, interval = '1d', range = '1mo' } = req.query;
   if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+  const yahooSym = toYahooSymbol(symbol);
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
     const response = await axios.get(url, { params: { interval, range }, headers: yahooHeaders });
     const result = response.data.chart.result[0];
     if (!result) throw new Error('No data');
@@ -125,8 +128,9 @@ app.get('/api/yahoo', async (req, res) => {
 app.get('/api/yahoo/quote', async (req, res) => {
   const { symbol } = req.query;
   if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+  const yahooSym = toYahooSymbol(symbol);
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
     const response = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders });
     const result = response.data.chart.result[0];
     if (!result) throw new Error('No quote data');
@@ -213,9 +217,10 @@ app.post('/api/copilot/query', async (req, res) => {
   }
 });
 
-// ---------- ARIMA forecast ----------
+// ---------- ARIMA forecast (also uses converted symbol) ----------
 async function fetchHistoricalPrices(symbol, days = 60) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+  const yahooSym = toYahooSymbol(symbol);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
   const response = await axios.get(url, { params: { interval: '1d', range: days <= 90 ? '3mo' : '6mo' }, headers: yahooHeaders });
   const result = response.data.chart.result[0];
   const closes = result.indicators.quote[0].close;
@@ -287,7 +292,7 @@ app.get('/api/forecast/arima', async (req, res) => {
   }
 });
 
-// ---------- WebSocket (unchanged) ----------
+// ---------- WebSocket (also uses converted symbol for price fetch) ----------
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const wss = new WebSocket.Server({ server });
 const subscribers = new Map();
@@ -313,7 +318,8 @@ setInterval(async () => {
     if (clients.size === 0) continue;
     let price = 100;
     try {
-      const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders });
+      const yahooSym = toYahooSymbol(symbol);
+      const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders });
       const lastClose = res.data.chart.result[0].indicators.quote[0].close.slice(-1)[0];
       if (lastClose) price = lastClose;
     } catch (e) { }
