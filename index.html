@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html class="h-full" lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -7,63 +8,72 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&amp;family=JetBrains+Mono:wght@100..800&amp;display=swap" rel="stylesheet"/>
-<style>
-        * { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+<style>        * { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
         .font-mono, pre, code, .mono, [class*="font-mono"], .indicator-value, #terminal-cli, #stock-price, #stock-change, #stock-change-pct, .watchlist-item, .news-meta, .refresh-btn {
             font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace !important;
         }
         body { background-color: #000000 !important; }
-        .bg-bbBg, .bg-black, .terminal-main, #terminal-workspace, .bg-bbPanel, .bg-bbHeader, .bg-bbPanel, .login-card, .indicator-panel, .news-item, #copilot-chat div, .bg-neutral-900\/50 { background-color: #000000 !important; }
+        .bg-bbBg, .bg-black, .terminal-main, #terminal-workspace, .bg-bbPanel, .bg-bbHeader, .login-card, .indicator-panel, .news-item, #copilot-chat div, .bg-neutral-900\/50 { background-color: #000000 !important; }
         .bg-bbHeader { background-color: #0a0a0a !important; }
         .bg-bbPanel { background-color: #050505 !important; }
         .bg-black\/60, .bg-black\/40 { background-color: rgba(0,0,0,0.9) !important; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: #000000; }
-        ::-webkit-scrollbar-thumb { background: #222222; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #333333; border-radius: 2px; }
         ::-webkit-scrollbar-thumb:hover { background: #dfb257; }
         @keyframes tick-up { 0% { background-color: rgba(0, 255, 0, 0.25); } 100% { background-color: transparent; } }
         @keyframes tick-down { 0% { background-color: rgba(255, 51, 51, 0.25); } 100% { background-color: transparent; } }
         .tick-up { animation: tick-up 0.8s ease-out; }
         .tick-down { animation: tick-down 0.8s ease-out; }
-        #chart-container { width: 100%; height: 100%; min-height: 350px; display: flex; flex-direction: column; }
+        #chart-container { width: 100%; height: 100%; min-height: 300px; display: flex; flex-direction: column; }
         .watchlist-placeholder { color: #666; text-align: center; padding: 20px; }
         .chart-error { color: #ff8888; text-align: center; padding: 20px; font-family: monospace; background: rgba(255,0,0,0.1); margin: 10px; border-radius: 4px; }
-        .terminal-main { overflow-y: auto; -webkit-overflow-scrolling: touch; }
-        button, .watchlist-item, .cursor-pointer { cursor: pointer; touch-action: manipulation; }
+        .terminal-main { overflow-y: auto; -webkit-overflow-scrolling: touch; scroll-behavior: smooth; }
+        button, .watchlist-item, .cursor-pointer { cursor: pointer; touch-action: manipulation; min-height: 32px; }
         body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
         #chart-parent-container { min-height: 300px; }
         @media (max-width: 1024px) { .indicator-panel { flex-direction: column; gap: 8px; } }
-        @media (max-width: 768px) { .text-xs { font-size: 11px; } .text-sm { font-size: 13px; } .px-4, .p-4 { padding-left: 0.75rem; padding-right: 0.75rem; } #stock-symbol { font-size: 1.25rem; } .indicator-panel { font-size: 10px; padding: 6px 8px; } .indicator-label { font-size: 8px; } }
+        @media (max-width: 768px) {
+            .text-xs { font-size: 11px; }
+            .text-sm { font-size: 13px; }
+            .px-3, .p-3 { padding: 0.5rem; }
+            #stock-symbol { font-size: 1.15rem; }
+            .indicator-panel { font-size: 10px; padding: 10px; }
+            .indicator-label { font-size: 8px; }
+            input, button { font-size: 14px !important; }
+        }
         .login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .login-card { background: #0a0a0a; border: 1px solid #282828; border-radius: 8px; padding: 2rem; width: 90%; max-width: 400px; }
-        .login-card input { background: black; border: 1px solid #282828; color: white; padding: 8px; width: 100%; margin-bottom: 12px; border-radius: 4px; }
-        .login-card button { background: #dfb257; color: black; font-weight: bold; padding: 8px; width: 100%; border-radius: 4px; cursor: pointer; }
+        .login-card input { background: black; border: 1px solid #282828; color: white; padding: 10px; width: 100%; margin-bottom: 12px; border-radius: 4px; }
+        .login-card button { background: #dfb257; color: black; font-weight: bold; padding: 10px; width: 100%; border-radius: 4px; cursor: pointer; }
         .login-card .error { color: #ff3333; font-size: 12px; margin-bottom: 8px; }
         .login-card .switch { text-align: center; margin-top: 12px; cursor: pointer; color: #a0a0a0; font-size: 12px; }
         .hidden { display: none !important; }
-        .indicator-panel { background: #050505; border: 1px solid #282828; border-radius: 8px; padding: 8px 12px; margin-top: 8px; font-size: 11px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+        .indicator-panel { background: #050505; border: 1px solid #282828; border-radius: 8px; padding: 10px 14px; margin-top: 8px; font-size: 11px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
         .indicator-card { display: flex; flex-direction: column; }
         .indicator-label { color: #888; font-size: 9px; text-transform: uppercase; }
         .indicator-value { font-weight: bold; font-family: 'JetBrains Mono', monospace; }
         .signal-bullish { color: #00ff00; }
         .signal-bearish { color: #ff3333; }
         .signal-neutral { color: #dfb257; }
-        .news-item { border-left: 2px solid #dfb257; padding: 6px 8px; margin-bottom: 6px; background: rgba(0,0,0,0.5); transition: background 0.2s; }
+        .news-item { border-left: 2px solid #dfb257; padding: 8px 10px; margin-bottom: 8px; background: rgba(0,0,0,0.5); transition: background 0.2s; }
         .news-item:hover { background: rgba(255,255,255,0.05); }
-        .news-title { font-size: 11px; font-weight: 500; line-height: 1.4; }
+        .news-title { font-size: 12px; font-weight: 500; line-height: 1.4; }
         .news-title a { color: #e2e2e2; text-decoration: none; }
         .news-title a:hover { color: #dfb257; text-decoration: underline; }
-        .news-meta { font-size: 9px; color: #888; margin-top: 4px; display: flex; justify-content: space-between; }
-        .refresh-btn { background: none; border: none; color: #dfb257; cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+        .news-meta { font-size: 10px; color: #888; margin-top: 4px; display: flex; justify-content: space-between; }
+        .refresh-btn { background: none; border: none; color: #dfb257; cursor: pointer; font-size: 14px; padding: 4px 8px; border-radius: 4px; }
         .refresh-btn:hover { background: #282828; }
         .movers-container { display: flex; gap: 16px; justify-content: space-between; }
         .movers-col { flex: 1; }
-        .mover-item { display: flex; justify-content: space-between; font-size: 10px; padding: 2px 0; }
+        .mover-item { display: flex; justify-content: space-between; font-size: 11px; padding: 4px 0; }
         .history-modal { max-height: 70vh; overflow-y: auto; }
         .history-table { width: 100%; font-size: 11px; border-collapse: collapse; }
-        .history-table th, .history-table td { padding: 6px; text-align: left; border-bottom: 1px solid #282828; }
-        #forecast-model { background-color: #050505; border: 1px solid #282828; color: #dfb257; border-radius: 4px; padding: 2px 4px; font-size: 10px; }
-    </style>
+        .history-table th, .history-table td { padding: 8px; text-align: left; border-bottom: 1px solid #282828; }
+        #forecast-model { background-color: #050505; border: 1px solid #282828; color: #dfb257; border-radius: 4px; padding: 4px; font-size: 11px; }
+        #watchlist-container { -webkit-overflow-scrolling: touch; }
+        #copilot-chat { -webkit-overflow-scrolling: touch; }
+        .watchlist-item td { padding-top: 8px !important; padding-bottom: 8px !important; }</style>
 </head>
 <body class="bg-black text-[#e2e2e2] h-full overflow-hidden select-none flex flex-col">
 <!-- LOGIN / REGISTRATION OVERLAY -->
@@ -81,19 +91,19 @@
 <!-- MAIN TERMINAL (initially hidden) -->
 <div class="h-screen flex flex-col overflow-hidden hidden" id="terminal-interface">
 <header class="bg-[#0a0a0a] border-b border-[#282828] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
-<div class="flex items-center space-x-3">
+<div class="flex items-center space-x-2 sm:space-x-3">
 <span class="text-bbAmber font-bold tracking-wider text-sm">FINANCIAL TERMINAL</span>
 <div class="hidden sm:flex space-x-3 text-[#a0a0a0]"><div>SYS: <span class="text-green-500">ONLINE</span></div><div>SECURITY: <span class="text-bbCyan">SECURE_CLIENT</span></div></div>
 </div>
 <div class="flex items-center space-x-3">
 <div class="text-bbAmber font-bold uppercase tracking-wider text-[10px] bg-amber-950/40 border border-bbAmber/30 px-2 py-0.5 rounded-sm" id="terminal-mode-badge">LIVE DATA</div>
-<div class="text-bbAmber font-bold font-mono text-[11px]" id="terminal-clock">--:--:-- UTC</div>
-<button class="bg-[#1a1a1a] border border-[#282828] px-2 py-0.5 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">HELP [F1]</button>
-<button class="bg-[#1a1a1a] border border-red-500 px-2 py-0.5 text-red-500 rounded text-[10px]" id="logout-btn">LOGOUT</button>
+<div class="text-bbAmber font-bold font-mono text-[10px] sm:text-[11px]" id="terminal-clock">--:--:-- UTC</div>
+<button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">HELP [F1]</button>
+<button class="bg-[#1a1a1a] border border-red-500 px-2 py-1 text-red-500 rounded text-[10px]" id="logout-btn">LOGOUT</button>
 </div>
 </header>
 <main class="flex-1 relative overflow-hidden">
-<div class="absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-y-auto terminal-main touch-pan-y" id="terminal-workspace">
+<div class="absolute inset-0 grid grid-cols-1 lg:grid-cols-12 gap-3 p-2 md:p-3 overflow-y-auto terminal-main touch-pan-y" id="terminal-workspace">
 <!-- LEFT PANEL -->
 <div class="lg:col-span-3 flex flex-col space-y-3 min-h-0">
 <!-- CLI -->
@@ -110,7 +120,7 @@
 <span class="text-bbAmber font-bold tracking-wider">WATCHLIST (50 US STOCKS)</span>
 <span class="text-[10px] text-[#a0a0a0] font-mono">LIVE FEED</span>
 </div>
-<div class="flex-1 overflow-y-auto pr-0.5" id="watchlist-container">
+<div class="flex-1 overflow-y-auto pr-0.5 min-h-[250px] lg:min-h-0" id="watchlist-container">
 <div class="watchlist-placeholder">Loading 50 symbols...</div>
 </div>
 </div>
@@ -122,8 +132,8 @@
 </div>
 <div class="flex justify-between items-center mb-2"><span class="text-green-500 font-bold">Cash:</span><span class="text-green-500 font-bold" id="portfolio-cash-lbl">$100,000.00</span></div>
 <div class="grid grid-cols-2 gap-2 text-xs mb-2">
-<div><label class="text-[9px] text-[#a0a0a0] block">ORDER TCKR</label><input class="w-full bg-black border border-[#282828] px-2 py-1 text-bbCyan focus:outline-none uppercase text-sm" id="trade-symbol" placeholder="AAPL" type="text"/></div>
-<div><label class="text-[9px] text-[#a0a0a0] block">VOLUME SIZE</label><input class="w-full bg-black border border-[#282828] px-2 py-1 text-bbCyan focus:outline-none text-sm" id="trade-qty" min="1" placeholder="10" step="1" type="number" value="10"/></div>
+<div><label class="text-[9px] text-[#a0a0a0] block">ORDER TCKR</label><input class="w-full bg-black border border-[#282828] px-2 py-2 text-bbCyan focus:outline-none uppercase text-sm" id="trade-symbol" placeholder="AAPL" type="text"/></div>
+<div><label class="text-[9px] text-[#a0a0a0] block">VOLUME SIZE</label><input class="w-full bg-black border border-[#282828] px-2 py-2 text-bbCyan focus:outline-none text-sm" id="trade-qty" min="1" placeholder="10" step="1" type="number" value="10"/></div>
 </div>
 <div class="grid grid-cols-2 gap-2">
 <button class="bg-emerald-950 hover:bg-emerald-800 text-green-500 border border-green-500 font-bold py-1.5 transition text-xs rounded touch-manipulation" onclick="executeQuickTrade('BUY')">BUY</button>
@@ -132,7 +142,7 @@
 </div>
 </div>
 <!-- CENTER PANEL: CHART + PREDICTIONS -->
-<div class="lg:col-span-6 flex flex-col min-h-[450px] lg:min-h-0">
+<div class="lg:col-span-6 flex flex-col min-h-[400px] order-1 lg:order-2">
 <div class="bg-[#050505] border border-[#282828] p-3 md:p-4 flex flex-col flex-1 min-h-0 relative">
 <div class="absolute top-0 left-0 w-16 h-0.5 bg-bbAmber"></div>
 <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-black/80 border border-[#282828] p-2 mb-2 rounded shrink-0 gap-2">
@@ -154,7 +164,7 @@
 <div class="indicator-panel" id="indicator-panel">
 <div class="indicator-card"><span class="indicator-label">RSI (14)</span><span class="indicator-value" id="rsi-value">--</span><span class="text-[9px]" id="rsi-signal">--</span></div>
 <div class="indicator-card"><span class="indicator-label">MA Crossover</span><span class="indicator-value" id="ma-status">--</span><span class="text-[9px]" id="ma-prediction">--</span></div>
-<div class="indicator-card"><span class="indicator-label">Forecast Model</span><select id="forecast-model" class="bg-black text-bbAmber text-xs border border-[#282828] rounded px-1"><option value="linear">Linear (Simple)</option><option value="arima">ARIMA (Backend)</option></select></div>
+<div class="indicator-card"><span class="indicator-label">Forecast Model</span><select class="bg-black text-bbAmber text-xs border border-[#282828] rounded px-1" id="forecast-model"><option value="linear">Linear (Simple)</option><option value="arima">ARIMA (Backend)</option></select></div>
 <div class="indicator-card"><span class="indicator-label">Forecast (5d)</span><span class="indicator-value" id="forecast-price">--</span><span class="text-[9px]" id="forecast-dir">--</span></div>
 </div>
 </div>
@@ -165,11 +175,11 @@
 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col flex-1 min-h-0 relative">
 <div class="absolute top-0 right-0 w-16 h-0.5 bg-bbCyan"></div>
 <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0"><span class="text-bbCyan font-bold tracking-wider">AI COPILOT</span><span class="text-[9px] bg-cyan-950 text-bbCyan px-1.5 py-0.5 rounded font-bold">GROQ</span></div>
-<div class="flex-1 overflow-y-auto pr-1 mb-3 space-y-3 text-xs flex flex-col select-text" id="copilot-chat"><div class="bg-black/50 border-l-2 border-bbCyan p-2 text-[#a0a0a0]"><strong class="text-bbCyan block text-[10px]">SYSTEM</strong>AI assistant active. Ask about markets, technicals, or predictions.</div></div>
+<div class="flex-1 overflow-y-auto pr-1 mb-3 space-y-3 text-xs flex flex-col select-text min-h-[200px] lg:min-h-0" id="copilot-chat"><div class="bg-black/50 border-l-2 border-bbCyan p-2 text-[#a0a0a0]"><strong class="text-bbCyan block text-[10px]">SYSTEM</strong>AI assistant active. Ask about markets, technicals, or predictions.</div></div>
 <div class="mt-auto shrink-0 border-t border-[#282828]/40 pt-2"><div class="flex bg-black border border-[#282828] focus-within:border-bbCyan transition rounded overflow-hidden"><input class="w-full bg-black text-bbCyan font-mono text-xs focus:outline-none p-2" id="copilot-input" placeholder="Ask AI about the market..." type="text"/><button class="bg-cyan-950 hover:bg-cyan-900 border-l border-[#282828] px-3 text-bbCyan text-xs transition font-bold" id="copilot-send-btn" onclick="sendCopilotMessage()">SEND</button></div></div>
 </div>
 <!-- Top Movers -->
-<div class="bg-[#050505] border border-[#282828] p-3"><div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs"><span class="text-bbAmber font-bold tracking-wider">TOP MOVERS</span><span class="text-[9px] text-[#a0a0a0]">from watchlist</span></div><div class="movers-container" id="top-movers-container"><div class="movers-col"><div class="text-green-500 text-[10px] mb-1">🚀 Gainers</div><div id="gainers-list">Loading...</div></div><div class="movers-col"><div class="text-red-500 text-[10px] mb-1">📉 Losers</div><div id="losers-list">Loading...</div></div></div></div>
+<div class="bg-[#050505] border border-[#282828] p-3"><div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs"><span class="text-bbAmber font-bold tracking-wider">TOP MOVERS</span><span class="text-[9px] text-[#a0a0a0]">from watchlist</span></div><div class="movers-container flex-col sm:flex-row gap-3 sm:gap-16 justify-between" id="top-movers-container"><div class="movers-col"><div class="text-green-500 text-[10px] mb-1">🚀 Gainers</div><div id="gainers-list">Loading...</div></div><div class="movers-col"><div class="text-red-500 text-[10px] mb-1">📉 Losers</div><div id="losers-list">Loading...</div></div></div></div>
 <!-- NEWS SECTION -->
 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col shrink-0" style="max-height: 280px;"><div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0"><span class="text-bbAmber font-bold tracking-wider">FINANCIAL NEWS</span><button class="refresh-btn" id="refresh-news-btn" onclick="fetchNews()">⟳</button></div><div class="flex-1 overflow-y-auto pr-1 space-y-1" id="news-container"><div class="text-gray-500 text-center py-4">Loading news...</div></div></div>
 </div>
@@ -179,7 +189,7 @@
 <!-- TRADE HISTORY MODAL -->
 <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="trade-history-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-3xl rounded shadow-2xl relative"><div class="flex justify-between items-center border-b border-[#282828] p-3"><h3 class="text-bbAmber font-bold">TRADE HISTORY</h3><button class="text-gray-400 hover:text-white" onclick="closeTradeHistoryModal()">✖</button></div><div class="history-modal p-3"><div id="trade-history-list">No trades yet.</div></div></div></div>
 <!-- Help Modal -->
-<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="help-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-lg p-5 rounded shadow-2xl relative"><h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-[#282828] pb-1 flex justify-between items-center"><span>COMMAND DIRECTORY</span><button class="text-[#a0a0a0] hover:text-red-500" onclick="toggleHelpModal()">✖</button></h2><div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] text-neutral-300"><p class="text-[#a0a0a0] mb-2">Enter commands in the header bar &amp; press Enter.</p><table class="w-full text-left"><thead><tr class="text-[#a0a0a0] border-b border-[#282828]"><th>COMMAND</th><th>ACTION</th></tr></thead><tbody>
+<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="help-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-lg p-5 rounded shadow-2xl relative"><h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-[#282828] pb-1 flex justify-between items-center"><span>COMMAND DIRECTORY</span><button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">✖</button></h2><div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] text-neutral-300"><p class="text-[#a0a0a0] mb-2">Enter commands in the header bar &amp; press Enter.</p><table class="w-full text-left"><thead><tr class="text-[#a0a0a0] border-b border-[#282828]"><th>COMMAND</th><th>ACTION</th></tr></thead><tbody>
 <tr><td class="text-bbAmber">AAPL</td><td>Switch focus to Apple</td></tr>
 <tr><td class="text-bbAmber">TSLA</td><td>Switch focus to Tesla</td></tr>
 <tr><td class="text-bbAmber">BUY AAPL 10</td><td>Buy 10 shares of AAPL</td></tr>
