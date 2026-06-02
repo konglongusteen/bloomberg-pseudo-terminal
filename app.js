@@ -239,30 +239,7 @@ function setCachedCandles(symbol, days, candles) { localStorage.setItem(`candles
 // ============================================================
 function haptic() { if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(100); }
 
-// ============================================================
-// 8. SWIPE TO DELETE (mobile portfolio footer)
-// ============================================================
-let touchStartX = 0, touchEndX = 0;
-function initSwipeToDelete() {
-    const footer = document.getElementById('footer-container');
-    if (!footer) return;
-    footer.addEventListener('touchstart', (e) => { touchStartX = e.changedTouches[0].screenX; });
-    footer.addEventListener('touchend', (e) => {
-        touchEndX = e.changedTouches[0].screenX;
-        const diff = touchEndX - touchStartX;
-        if (Math.abs(diff) > 50) {
-            const target = e.target.closest('.inline-block');
-            if (target && target.onclick) {
-                const sym = target.innerText.split(':')[0];
-                if (sym && confirm(`Delete ${sym} from portfolio? (This only removes the position, not sell)`)) {
-                    delete portfolio.holdings[sym];
-                    updatePortfolioDisplay();
-                    syncPortfolioToBackend();
-                }
-            }
-        }
-    });
-}
+
 
 // ============================================================
 // 9. WATCHLIST FILTERS (search, gainers/losers, favourites)
