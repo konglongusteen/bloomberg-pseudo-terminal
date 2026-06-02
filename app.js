@@ -996,4 +996,91 @@ async function initTerminal() {
             }
         }).observe(portfolioCanvas);
     }
+// Inside initTerminal(), after all other code
+reorderMobileLayout();
 }
+
+// Mobile portrait layout reordering
+function reorderMobileLayout() {
+    const isPortrait = window.innerHeight > window.innerWidth;
+    const terminalWorkspace = document.getElementById('terminal-workspace');
+    if (!terminalWorkspace) return;
+    
+    if (isPortrait && window.innerWidth <= 768) {
+        // Get all required elements by ID (robust)
+        const watchlist = document.querySelector('.watchlist-module');
+        const chart = document.querySelector('.chart-module');
+        const trade = document.querySelector('.trade-module');
+        const portfolioChartContainer = document.getElementById('portfolio-history-container'); // now using ID
+        const ai = document.querySelector('.ai-module');
+        const news = document.querySelector('.news-module');
+        
+        // Create mobile container if not exists
+        let mobileContainer = document.getElementById('mobile-portrait-container');
+        if (!mobileContainer) {
+            mobileContainer = document.createElement('div');
+            mobileContainer.id = 'mobile-portrait-container';
+            mobileContainer.style.display = 'flex';
+            mobileContainer.style.flexDirection = 'column';
+            mobileContainer.style.gap = '1rem';
+            mobileContainer.style.padding = '1rem';
+            const grid = document.getElementById('main-resizable-grid');
+            grid.parentNode.insertBefore(mobileContainer, grid);
+        }
+        
+        // Move elements in desired order
+        if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
+        if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
+        if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
+        if (portfolioChartContainer && portfolioChartContainer.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioChartContainer);
+        if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
+        if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
+        
+        // Hide original grid
+        const grid = document.getElementById('main-resizable-grid');
+        if (grid) grid.style.display = 'none';
+        if (mobileContainer) mobileContainer.style.display = 'flex';
+    } else {
+        // Landscape or desktop: restore original layout
+        const mobileContainer = document.getElementById('mobile-portrait-container');
+        if (mobileContainer) {
+            const watchlist = document.querySelector('.watchlist-module');
+            const chart = document.querySelector('.chart-module');
+            const trade = document.querySelector('.trade-module');
+            const portfolioChartContainer = document.getElementById('portfolio-history-container');
+            const ai = document.querySelector('.ai-module');
+            const news = document.querySelector('.news-module');
+            
+            const leftPane = document.getElementById('left-pane');
+            const centerPane = document.getElementById('center-pane');
+            const rightPane = document.getElementById('right-pane');
+            const leftContent = leftPane?.querySelector('.pane-content');
+            const centerContent = centerPane?.querySelector('.pane-content');
+            const rightContent = rightPane?.querySelector('.pane-content');
+            
+            if (watchlist && leftContent && watchlist.parentNode !== leftContent) leftContent.insertBefore(watchlist, leftContent.firstChild);
+            if (chart && centerContent) centerContent.insertBefore(chart, centerContent.firstChild);
+            if (trade && leftContent) leftContent.appendChild(trade);
+            if (portfolioChartContainer && rightContent) rightContent.insertBefore(portfolioChartContainer, rightContent.firstChild);
+            if (ai && rightContent) rightContent.insertBefore(ai, portfolioChartContainer?.nextSibling || rightContent.firstChild);
+            if (news && rightContent) rightContent.appendChild(news);
+            
+            mobileContainer.remove();
+        }
+        const grid = document.getElementById('main-resizable-grid');
+        if (grid) grid.style.display = 'flex';
+    }
+}
+
+// Listen for orientation and resize events
+window.addEventListener('resize', () => {
+    reorderMobileLayout();
+    // Also refresh chart if needed
+    setTimeout(() => {
+        if (portfolioChart) updatePortfolioChart();
+        if (chart) refreshChartSize();
+    }, 100);
+});
+
+// Call initially after login and after DOM ready
+setTimeout(reorderMobileLayout, 500);
