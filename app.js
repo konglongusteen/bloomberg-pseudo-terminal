@@ -1003,6 +1003,5 @@ async function initTerminal() {
     document.getElementById('apply-filter')?.addEventListener('click', applyWatchlistFilters);
     document.getElementById('favourite-filter')?.addEventListener('change', applyWatchlistFilters);
     document.getElementById('search-input')?.addEventListener('input', applyWatchlistFilters);
-    initSwipeToDelete();
 }
 window.toggleFavourite = toggleFavourite;
