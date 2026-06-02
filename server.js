@@ -5,8 +5,9 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const WebSocket = require('ws');
-const fs = require('fs');
-const path = require('path');
+
+// Import MongoDB helpers (from your existing database.js)
+const { getUsers, saveUser, updateUserPortfolio, connectDb } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,68 +15,82 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
+// Ensure DB connection on startup (optional, but good for logging)
+connectDb().catch(console.error);
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 app.get('/', (req, res) => res.sendFile(__dirname + '/index.html'));
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// ---------- Database (file) ----------
-const DB_FILE = path.join(__dirname, 'db.json');
-let db = { users: [], portfolios: {} };
-function loadDB() {
-  try { if (fs.existsSync(DB_FILE)) db = JSON.parse(fs.readFileSync(DB_FILE)); } catch(e) {}
-}
-function saveDB() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
-loadDB();
-function getPortfolio(username) {
-  if (!db.portfolios[username]) db.portfolios[username] = { cash: 100000, holdings: {} };
-  saveDB();
-  return db.portfolios[username];
-}
-
-// ---------- Auth ----------
+// ---------- Auth Routes (MongoDB) ----------
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
-  if (db.users.find(u => u.username === username)) return res.status(400).json({ error: 'User exists' });
+
+  const users = await getUsers();
+  if (users.find(u => u.username === username)) {
+    return res.status(400).json({ error: 'User exists' });
+  }
+
   const hashed = await bcrypt.hash(password, 10);
-  db.users.push({ username, password: hashed });
-  db.portfolios[username] = { cash: 100000, holdings: {} };
-  saveDB();
+  const newUser = {
+    username,
+    password: hashed,
+    portfolio: { cash: 100000, holdings: {} },
+    createdAt: new Date()
+  };
+  const saved = await saveUser(newUser);
+  if (!saved) return res.status(500).json({ error: 'Registration failed' });
+
   res.json({ message: 'Registered' });
 });
 
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  const user = db.users.find(u => u.username === username);
+  const users = await getUsers();
+  const user = users.find(u => u.username === username);
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
   const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
-  res.json({ token, username, portfolio: getPortfolio(username) });
+  res.json({
+    token,
+    username,
+    portfolio: user.portfolio || { cash: 100000, holdings: {} }
+  });
 });
 
 function authenticate(req, res, next) {
   const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   try {
     req.user = jwt.verify(auth.slice(7), JWT_SECRET);
     next();
-  } catch { res.status(401).json({ error: 'Invalid token' }); }
+  } catch {
+    res.status(401).json({ error: 'Invalid token' });
+  }
 }
 
-app.get('/api/portfolio', authenticate, (req, res) => {
-  res.json({ portfolio: getPortfolio(req.user.username) });
+app.get('/api/portfolio', authenticate, async (req, res) => {
+  const users = await getUsers();
+  const user = users.find(u => u.username === req.user.username);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ portfolio: user.portfolio || { cash: 100000, holdings: {} } });
 });
 
-app.post('/api/portfolio/sync', authenticate, (req, res) => {
-  db.portfolios[req.user.username] = req.body.portfolio;
-  saveDB();
-  res.json({ success: true });
+app.post('/api/portfolio/sync', authenticate, async (req, res) => {
+  const ok = await updateUserPortfolio(req.user.username, req.body.portfolio);
+  if (ok) res.json({ success: true });
+  else res.status(500).json({ error: 'Sync failed' });
 });
 
-// ---------- Yahoo Finance (robust) ----------
+// ---------- Yahoo Finance (unchanged) ----------
 const yahooHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   'Accept': 'application/json'
@@ -153,7 +168,6 @@ app.get('/api/finnhub', async (req, res) => {
 // ---------- News (Finnhub) ----------
 app.get('/api/news', async (req, res) => {
   if (!FINNHUB_API_KEY) {
-    // Fallback with real external links (no hardcoded data except emergency)
     return res.json({ news: [] });
   }
   try {
@@ -214,30 +228,30 @@ function ar2Forecast(prices, steps = 5) {
   const y = prices.map(p => p.close);
   const n = y.length;
   const X = [], Y = [];
-  for (let t = 2; t < n; t++) { X.push([1, y[t-1], y[t-2]]); Y.push(y[t]); }
+  for (let t = 2; t < n; t++) { X.push([1, y[t - 1], y[t - 2]]); Y.push(y[t]); }
   const XtX = [
-    [X.reduce((s, row) => s + row[0]*row[0], 0), X.reduce((s, row) => s + row[0]*row[1], 0), X.reduce((s, row) => s + row[0]*row[2], 0)],
-    [X.reduce((s, row) => s + row[1]*row[0], 0), X.reduce((s, row) => s + row[1]*row[1], 0), X.reduce((s, row) => s + row[1]*row[2], 0)],
-    [X.reduce((s, row) => s + row[2]*row[0], 0), X.reduce((s, row) => s + row[2]*row[1], 0), X.reduce((s, row) => s + row[2]*row[2], 0)]
+    [X.reduce((s, row) => s + row[0] * row[0], 0), X.reduce((s, row) => s + row[0] * row[1], 0), X.reduce((s, row) => s + row[0] * row[2], 0)],
+    [X.reduce((s, row) => s + row[1] * row[0], 0), X.reduce((s, row) => s + row[1] * row[1], 0), X.reduce((s, row) => s + row[1] * row[2], 0)],
+    [X.reduce((s, row) => s + row[2] * row[0], 0), X.reduce((s, row) => s + row[2] * row[1], 0), X.reduce((s, row) => s + row[2] * row[2], 0)]
   ];
   const XtY = [
     X.reduce((s, row, i) => s + row[0] * Y[i], 0),
     X.reduce((s, row, i) => s + row[1] * Y[i], 0),
     X.reduce((s, row, i) => s + row[2] * Y[i], 0)
   ];
-  const det = XtX[0][0]*(XtX[1][1]*XtX[2][2] - XtX[1][2]*XtX[2][1]) - XtX[0][1]*(XtX[1][0]*XtX[2][2] - XtX[1][2]*XtX[2][0]) + XtX[0][2]*(XtX[1][0]*XtX[2][1] - XtX[1][1]*XtX[2][0]);
+  const det = XtX[0][0] * (XtX[1][1] * XtX[2][2] - XtX[1][2] * XtX[2][1]) - XtX[0][1] * (XtX[1][0] * XtX[2][2] - XtX[1][2] * XtX[2][0]) + XtX[0][2] * (XtX[1][0] * XtX[2][1] - XtX[1][1] * XtX[2][0]);
   if (Math.abs(det) < 1e-9) return null;
   const inv = [
-    [(XtX[1][1]*XtX[2][2] - XtX[1][2]*XtX[2][1])/det, (XtX[0][2]*XtX[2][1] - XtX[0][1]*XtX[2][2])/det, (XtX[0][1]*XtX[1][2] - XtX[0][2]*XtX[1][1])/det],
-    [(XtX[1][2]*XtX[2][0] - XtX[1][0]*XtX[2][2])/det, (XtX[0][0]*XtX[2][2] - XtX[0][2]*XtX[2][0])/det, (XtX[0][2]*XtX[1][0] - XtX[0][0]*XtX[1][2])/det],
-    [(XtX[1][0]*XtX[2][1] - XtX[1][1]*XtX[2][0])/det, (XtX[0][1]*XtX[2][0] - XtX[0][0]*XtX[2][1])/det, (XtX[0][0]*XtX[1][1] - XtX[0][1]*XtX[1][0])/det]
+    [(XtX[1][1] * XtX[2][2] - XtX[1][2] * XtX[2][1]) / det, (XtX[0][2] * XtX[2][1] - XtX[0][1] * XtX[2][2]) / det, (XtX[0][1] * XtX[1][2] - XtX[0][2] * XtX[1][1]) / det],
+    [(XtX[1][2] * XtX[2][0] - XtX[1][0] * XtX[2][2]) / det, (XtX[0][0] * XtX[2][2] - XtX[0][2] * XtX[2][0]) / det, (XtX[0][2] * XtX[1][0] - XtX[0][0] * XtX[1][2]) / det],
+    [(XtX[1][0] * XtX[2][1] - XtX[1][1] * XtX[2][0]) / det, (XtX[0][1] * XtX[2][0] - XtX[0][0] * XtX[2][1]) / det, (XtX[0][0] * XtX[1][1] - XtX[0][1] * XtX[1][0]) / det]
   ];
   const coeff = inv.map(row => row.reduce((s, v, i) => s + v * XtY[i], 0));
   const [c, phi1, phi2] = coeff;
   const forecast = [];
-  let prev1 = y[n-1], prev2 = y[n-2];
+  let prev1 = y[n - 1], prev2 = y[n - 2];
   for (let i = 0; i < steps; i++) {
-    const next = c + phi1*prev1 + phi2*prev2;
+    const next = c + phi1 * prev1 + phi2 * prev2;
     forecast.push(next);
     prev2 = prev1;
     prev1 = next;
@@ -253,27 +267,27 @@ app.get('/api/forecast/arima', async (req, res) => {
     if (historical.length < 10) throw new Error('Insufficient data');
     const forecast = ar2Forecast(historical, parseInt(days));
     if (!forecast) throw new Error('Forecast failed');
-    const lastPrice = historical[historical.length-1].close;
+    const lastPrice = historical[historical.length - 1].close;
     const residuals = [];
     for (let i = 3; i < historical.length; i++) {
       const pred = ar2Forecast(historical.slice(0, i), 1);
       if (pred && pred[0]) residuals.push(historical[i].close - pred[0]);
     }
-    const stdDev = residuals.length ? Math.sqrt(residuals.reduce((s, r) => s + r*r, 0) / residuals.length) : 0;
+    const stdDev = residuals.length ? Math.sqrt(residuals.reduce((s, r) => s + r * r, 0) / residuals.length) : 0;
     const confidence = 1.96 * stdDev;
     res.json({
       success: true,
       symbol,
       forecast: forecast.map(v => Number(v.toFixed(2))),
       lastPrice,
-      confidenceInterval: { lower: forecast[forecast.length-1] - confidence, upper: forecast[forecast.length-1] + confidence }
+      confidenceInterval: { lower: forecast[forecast.length - 1] - confidence, upper: forecast[forecast.length - 1] + confidence }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ---------- WebSocket ----------
+// ---------- WebSocket (unchanged) ----------
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const wss = new WebSocket.Server({ server });
 const subscribers = new Map();
@@ -285,7 +299,7 @@ wss.on('connection', ws => {
         if (!subscribers.has(symbol)) subscribers.set(symbol, new Set());
         subscribers.get(symbol).add(ws);
       }
-    } catch(e) {}
+    } catch (e) { }
   });
   ws.on('close', () => {
     for (const [sym, clients] of subscribers.entries()) {
@@ -302,7 +316,7 @@ setInterval(async () => {
       const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders });
       const lastClose = res.data.chart.result[0].indicators.quote[0].close.slice(-1)[0];
       if (lastClose) price = lastClose;
-    } catch(e) {}
+    } catch (e) { }
     const change = (Math.random() - 0.5) * price * 0.01;
     const newPrice = price + change;
     const msg = JSON.stringify({ type: 'trade', symbol, price: newPrice });
