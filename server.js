@@ -235,13 +235,57 @@ app.get('/api/news', async (req, res) => {
   }
 });
 
-// ---------- AI Copilot Proxy (mock) ----------
+// ---------- AI Copilot Proxy (Groq API) ----------
 app.post('/api/copilot/query', async (req, res) => {
   const { prompt } = req.body;
-  // Replace with actual Groq API call if you have a key
-  res.json({ text: `AI response to: "${prompt}". (Mock reply – integrate real LLM)` });
-});
+  
+  if (!prompt) {
+    return res.status(400).json({ error: 'Prompt is required' });
+  }
 
+  const GROQ_API_KEY = process.env.GROQ_API_KEY;
+  if (!GROQ_API_KEY) {
+    console.error('GROQ_API_KEY missing in environment');
+    return res.status(500).json({ error: 'AI service not configured' });
+  }
+
+  try {
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'llama-3.3-70b-versatile',   // 🔁 REPLACE THIS LINE (line ~12 within the try block)
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a financial AI assistant. Answer concisely and helpfully about stock markets, technical analysis, trading, and economic news. Use markdown for formatting if helpful.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 500
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+
+    const reply = response.data.choices[0].message.content;
+    res.json({ text: reply });
+  } catch (error) {
+    console.error('Groq API error:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'AI service temporarily unavailable',
+      details: error.response?.data?.error?.message || error.message
+    });
+  }
+});
 // ---------- ARIMA Forecast Endpoint (AR(2) model) ----------
 async function fetchHistoricalPrices(symbol, days = 60) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`;
