@@ -1,0 +1,14 @@
+{
+  "users": [
+    {
+      "username": "22",
+      "password": "$2b$10$4kcnzIPPHvM8/FQOM3PJD.JJgBPcn3rbewQzWTviNfl9bSi.skHiy"
+    }
+  ],
+  "portfolios": {
+    "22": {
+      "cash": 100013.10117690556,
+      "holdings": {}
+    }
+  }
+}

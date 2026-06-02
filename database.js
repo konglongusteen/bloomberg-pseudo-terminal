@@ -1,50 +1,61 @@
-/**
- * LOCAL DATABASE MANAGER
- * To ensure zero-configuration setup for cloning developers, we utilize a 
- * robust file-based database. User credentials, password hashes, and profiles
- * are safely written to a persistent JSON-file backup locally.
- */
-const fs = require('fs');
-const path = require('path');
+const { MongoClient } = require('mongodb');
 
-const DB_FILE = path.join(__dirname, 'user_database.json');
+const uri = process.env.MONGODB_URI;
+if (!uri) console.error('❌ MONGODB_URI not defined');
 
-// Initialize local JSON flat-file database if missing
-function initDb() {
-    if (!fs.existsSync(DB_FILE)) {
-        fs.writeFileSync(DB_FILE, JSON.stringify({ users: [] }, null, 2));
-    }
-}
+let client = null;
+let db = null;
 
-function readData() {
-    initDb();
+async function connectDb() {
+    if (db) return db;
+    if (!uri) return null;
     try {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        return JSON.parse(raw);
-    } catch (e) {
-        return { users: [] };
-    }
-}
-
-function writeData(data) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-}
-
-module.exports = {
-    getUsers: () => readData().users,
-    saveUser: (user) => {
-        const db = readData();
-        db.users.push(user);
-        writeData(db);
-    },
-    updateUserPortfolio: (username, portfolio) => {
-        const db = readData();
-        const idx = db.users.findIndex(u => u.username.toLowerCase() === username.toLowerCase());
-        if (idx !== -1) {
-            db.users[idx].portfolio = portfolio;
-            writeData(db);
-            return true;
+        client = new MongoClient(uri, {
+            serverSelectionTimeoutMS: 15000, // 15 seconds
+            connectTimeoutMS: 15000,
+        });
+        await client.connect();
+        db = client.db('financial_terminal');
+        await db.collection('users').createIndex({ username: 1 }, { unique: true });
+        console.log('✅ MongoDB connected');
+        return db;
+    } catch (err) {
+        console.error('❌ MongoDB connection error:', err.message);
+        // If SRV fails, try a fallback by constructing a direct connection string (requires manual fix)
+        if (err.message.includes('querySrv') && uri.includes('mongodb+srv')) {
+            console.warn('⚠️ SRV lookup failed – check your network or use a non‑SRV connection string.');
+            console.warn('   Replace MONGODB_URI in .env with the standard format:');
+            console.warn('   mongodb://<user>:<pass>@cluster0.xxxxx.mongodb.net:27017/?retryWrites=true&w=majority');
         }
-        return false;
+        return null;
     }
-};
+}
+
+async function getUsers() {
+    const database = await connectDb();
+    if (!database) return [];
+    return await database.collection('users').find({}).toArray();
+}
+
+async function saveUser(user) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        await database.collection('users').insertOne(user);
+        return true;
+    } catch (err) { return false; }
+}
+
+async function updateUserPortfolio(username, portfolio) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        const result = await database.collection('users').updateOne(
+            { username: username.toLowerCase() },
+            { $set: { portfolio } }
+        );
+        return result.modifiedCount > 0;
+    } catch (err) { return false; }
+}
+
+module.exports = { getUsers, saveUser, updateUserPortfolio };
