@@ -144,83 +144,255 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
 .hidden { display: none !important; }
 .error-message { color: #ff3333; font-size: 10px; margin-top: 5px; text-align: center; }
 
-/* Light theme */
-body.light-theme {
-    background-color: #f3f4f6 !important;
-    color: #111827 !important;
-}
-body.light-theme .bg-bbBg,
-body.light-theme .bg-black,
-body.light-theme .terminal-main,
-body.light-theme #terminal-workspace,
-body.light-theme .bg-bbPanel,
-body.light-theme .bg-bbHeader,
-body.light-theme .login-card,
-body.light-theme .indicator-panel,
-body.light-theme .news-item,
-body.light-theme #copilot-chat div,
-body.light-theme .bg-neutral-900\/50,
-body.light-theme .bg-[#050505],
-body.light-theme .bg-[#0a0a0a],
-body.light-theme .bg-black\/80,
-body.light-theme .bg-black {
+/* ============================================================
+   LIGHT MODE – Force EVERY element to white background and black text
+   ============================================================ */
+
+/* Base body and html */
+body.light-theme,
+body.light-theme html {
     background-color: #ffffff !important;
 }
-body.light-theme .border,
-body.light-theme .border-b,
-body.light-theme .border-t,
-body.light-theme .border-r,
-body.light-theme .border-l,
-body.light-theme .border-bbAmber,
-body.light-theme .border-bbCyan,
-body.light-theme .border-green-500,
-body.light-theme .border-red-500 {
-    border-color: #d1d5db !important;
+
+/* Universal selector to override all elements – but careful with specificity */
+body.light-theme * {
+    background-color: #ffffff !important;
+}
+
+/* But we need to exclude elements that should not have white background (like charts canvas, but canvas background is handled by chart options) */
+body.light-theme canvas {
+    background-color: transparent !important; /* Let chart background handle it */
+}
+
+/* Reset borders */
+body.light-theme * {
+    border-color: #cccccc !important;
+}
+
+/* Force text black except for specific price colors */
+body.light-theme,
+body.light-theme *,
+body.light-theme p,
+body.light-theme span,
+body.light-theme div,
+body.light-theme h1,
+body.light-theme h2,
+body.light-theme h3,
+body.light-theme h4,
+body.light-theme h5,
+body.light-theme h6,
+body.light-theme label,
+body.light-theme td,
+body.light-theme th,
+body.light-theme li,
+body.light-theme .watchlist-symbol-name,
+body.light-theme .indicator-value,
+body.light-theme #stock-symbol,
+body.light-theme #portfolio-cash-lbl,
+body.light-theme .font-mono,
+body.light-theme .mover-item span:first-child,
+body.light-theme #portfolio-positions-list .inline-block strong,
+body.light-theme .news-title a,
+body.light-theme .news-meta,
+body.light-theme .indicator-label,
+body.light-theme .watchlist-company,
+body.light-theme .refresh-btn,
+body.light-theme button:not(.bg-emerald-950):not(.bg-red-950):not(.bg-amber-950),
+body.light-theme label,
+body.light-theme .text-[#a0a0a0],
+body.light-theme .text-gray-500,
+body.light-theme .login-card .switch,
+body.light-theme .error-message {
+    color: #000000 !important;
+}
+
+/* Keep green/red for price changes and signals */
+body.light-theme .text-green-500,
+body.light-theme .signal-bullish,
+body.light-theme .tick-up .text-green-500 {
+    color: #10b981 !important;
+}
+body.light-theme .text-red-500,
+body.light-theme .signal-bearish,
+body.light-theme .tick-down .text-red-500 {
+    color: #ef4444 !important;
+}
+body.light-theme .signal-neutral {
+    color: #b45309 !important;
 }
 body.light-theme .text-bbAmber,
 body.light-theme .text-bbCyan {
     color: #b45309 !important;
 }
-body.light-theme .text-green-500 {
-    color: #10b981 !important;
-}
-body.light-theme .text-red-500 {
-    color: #ef4444 !important;
-}
-body.light-theme .text-[#a0a0a0],
-body.light-theme .text-gray-500,
-body.light-theme .watchlist-company,
-body.light-theme .news-meta,
-body.light-theme .indicator-label {
-    color: #6b7280 !important;
-}
+
+/* Inputs and selects – override background to white */
 body.light-theme input,
 body.light-theme select,
-body.light-theme button.bg-black {
+body.light-theme button.bg-black,
+body.light-theme .bg-black input,
+body.light-theme .bg-black select,
+body.light-theme #trade-symbol,
+body.light-theme #trade-qty,
+body.light-theme #search-input,
+body.light-theme #filter-type,
+body.light-theme #filter-value {
     background-color: #f9fafb !important;
-    color: #111827 !important;
-    border-color: #d1d5db !important;
+    color: #000000 !important;
+    border-color: #cccccc !important;
 }
 
-/* Mobile: add bottom padding to main workspace when footer is fixed */
-@media (max-width: 768px) and (orientation: portrait) {
-    #terminal-workspace {
-        padding-bottom: 85px !important; /* already there, ensure it's applied */
-    }
-    /* Ensure resize handles are visible on landscape tablets (so touch works) */
-    .resize-handle {
-        display: block !important;
-        width: 12px; /* larger touch target */
-        background: #3a3a3a;
-    }
-    .resize-handle:hover, .resize-handle.active {
-        background: #dfb257;
-    }
+/* Portfolio items */
+body.light-theme #portfolio-positions-list .inline-block {
+    background-color: #ffffff !important;
+    border-color: #cccccc !important;
 }
-/* For all touch devices (including tablets), make handles touch-friendly */
-@media (hover: none) and (pointer: coarse) {
-    .resize-handle {
-        width: 12px;
-        min-width: 12px;
-    }
+body.light-theme #portfolio-positions-list .inline-block strong {
+    color: #000000 !important;
+}
+
+/* News items */
+body.light-theme .news-item {
+    background-color: #ffffff !important;
+    border-left-color: #b45309 !important;
+}
+body.light-theme .news-item:hover {
+    background-color: #f5f5f5 !important;
+}
+body.light-theme .refresh-btn {
+    color: #b45309 !important;
+}
+body.light-theme .refresh-btn:hover {
+    background-color: #e5e7eb !important;
+}
+
+/* Resize handle */
+body.light-theme .resize-handle {
+    background-color: #cccccc !important;
+}
+body.light-theme .resize-handle:hover,
+body.light-theme .resize-handle.active {
+    background-color: #b45309 !important;
+}
+
+/* Buttons (buy/sell/sell-all) – keep their darkish colors but ensure text readable */
+body.light-theme .bg-emerald-950 {
+    background-color: #064e3b !important;
+}
+body.light-theme .bg-red-950 {
+    background-color: #7f1d1d !important;
+}
+body.light-theme .bg-amber-950 {
+    background-color: #78350f !important;
+}
+body.light-theme .bg-emerald-950:hover {
+    background-color: #047857 !important;
+}
+body.light-theme .bg-red-950:hover {
+    background-color: #b91c1c !important;
+}
+body.light-theme .bg-amber-950:hover {
+    background-color: #b45309 !important;
+}
+body.light-theme .bg-emerald-950 .text-green-500,
+body.light-theme .bg-red-950 .text-red-500,
+body.light-theme .bg-amber-950 .text-bbAmber {
+    color: #ffffff !important; /* Make text white on these dark backgrounds */
+}
+
+/* Chart container – ensure white background */
+body.light-theme #chart-container {
+    background-color: #ffffff !important;
+}
+
+/* Additional light mode text overrides for interactive elements */
+body.light-theme select,
+body.light-theme option,
+body.light-theme #forecast-model {
+    color: #000000 !important;
+    background-color: #f9fafb !important;
+}
+
+body.light-theme .tv-lightweight-charts-tooltip {
+    background-color: #ffffff !important;
+    border-color: #cccccc !important;
+    color: #000000 !important;
+}
+
+/* Force all text black in light mode (overrides any missed inline styles) */
+body.light-theme #terminal-interface,
+body.light-theme #terminal-interface * {
+    color: #000000 !important;
+}
+
+/* Then re-apply coloured text for specific elements (green/red/amber) */
+body.light-theme .text-green-500,
+body.light-theme .signal-bullish,
+body.light-theme .tick-up .text-green-500 {
+    color: #10b981 !important;
+}
+body.light-theme .text-red-500,
+body.light-theme .signal-bearish,
+body.light-theme .tick-down .text-red-500 {
+    color: #ef4444 !important;
+}
+body.light-theme .signal-neutral,
+body.light-theme .text-bbAmber,
+body.light-theme .text-bbCyan {
+    color: #b45309 !important;
+}
+
+/* Ensure buttons keep readable text on their dark backgrounds */
+body.light-theme .bg-emerald-950,
+body.light-theme .bg-red-950,
+body.light-theme .bg-amber-950 {
+    color: #ffffff !important;
+}
+/* Light mode: AI copilot chat messages */
+body.light-theme #copilot-chat div,
+body.light-theme .bg-black\/50,
+body.light-theme .bg-neutral-900\/50 {
+    background-color: #f0f0f0 !important;
+    border-left-color: #b45309 !important;
+}
+body.light-theme #copilot-chat .text-bbCyan,
+body.light-theme #copilot-chat strong {
+    color: #b45309 !important;
+}
+body.light-theme #copilot-chat .text-bbAmber {
+    color: #b45309 !important;
+}
+/* Force AI chat messages to have white background in light mode */
+body.light-theme #copilot-chat div {
+    background-color: #ffffff !important;
+    border-color: #cccccc !important;
+    color: #000000 !important;
+}
+
+/* Ensure the system message border remains visible */
+body.light-theme #copilot-chat .bg-black\/50 {
+    background-color: #f0f0f0 !important;
+}
+
+/* The AI message container itself */
+body.light-theme .ai-module,
+body.light-theme .bg-cyan-950 {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+}
+
+/* The input field in AI panel */
+body.light-theme #copilot-input {
+    background-color: #f9fafb !important;
+    color: #000000 !important;
+    border-color: #cccccc !important;
+}
+
+/* The send button */
+body.light-theme #copilot-send-btn {
+    background-color: #e5e7eb !important;
+    color: #000000 !important;
+    border-color: #cccccc !important;
+}
+body.light-theme #copilot-send-btn:hover {
+    background-color: #d1d5db !important;
 }

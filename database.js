@@ -11,26 +11,23 @@ async function connectDb() {
     if (!uri) return null;
     try {
         client = new MongoClient(uri, {
-            serverSelectionTimeoutMS: 15000, // 15 seconds
+            serverSelectionTimeoutMS: 15000,
             connectTimeoutMS: 15000,
         });
         await client.connect();
         db = client.db('financial_terminal');
         await db.collection('users').createIndex({ username: 1 }, { unique: true });
+        await db.collection('trade_history').createIndex({ username: 1, timestamp: -1 });
+        await db.collection('portfolio_history').createIndex({ username: 1, timestamp: 1 });
         console.log('✅ MongoDB connected');
         return db;
     } catch (err) {
         console.error('❌ MongoDB connection error:', err.message);
-        // If SRV fails, try a fallback by constructing a direct connection string (requires manual fix)
-        if (err.message.includes('querySrv') && uri.includes('mongodb+srv')) {
-            console.warn('⚠️ SRV lookup failed – check your network or use a non‑SRV connection string.');
-            console.warn('   Replace MONGODB_URI in .env with the standard format:');
-            console.warn('   mongodb://<user>:<pass>@cluster0.xxxxx.mongodb.net:27017/?retryWrites=true&w=majority');
-        }
         return null;
     }
 }
 
+// ---------- Users ----------
 async function getUsers() {
     const database = await connectDb();
     if (!database) return [];
@@ -58,4 +55,62 @@ async function updateUserPortfolio(username, portfolio) {
     } catch (err) { return false; }
 }
 
-module.exports = { getUsers, saveUser, updateUserPortfolio };
+// ---------- Trade History ----------
+async function getTradeHistory(username, limit = 100) {
+    const database = await connectDb();
+    if (!database) return [];
+    return await database.collection('trade_history')
+        .find({ username: username.toLowerCase() })
+        .sort({ timestamp: -1 })
+        .limit(limit)
+        .toArray();
+}
+
+async function saveTradeHistory(username, trades) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        for (const trade of trades) {
+            await database.collection('trade_history').updateOne(
+                { id: trade.id, username: username.toLowerCase() },
+                { $set: { ...trade, username: username.toLowerCase() } },
+                { upsert: true }
+            );
+        }
+        return true;
+    } catch (err) { return false; }
+}
+
+// ---------- Portfolio Value History ----------
+async function getPortfolioHistory(username) {
+    const database = await connectDb();
+    if (!database) return [];
+    return await database.collection('portfolio_history')
+        .find({ username: username.toLowerCase() })
+        .sort({ timestamp: 1 })
+        .toArray();
+}
+
+async function savePortfolioHistory(username, timestamp, totalValue) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        await database.collection('portfolio_history').updateOne(
+            { username: username.toLowerCase(), timestamp },
+            { $set: { totalValue } },
+            { upsert: true }
+        );
+        return true;
+    } catch (err) { return false; }
+}
+
+module.exports = {
+    connectDb,
+    getUsers,
+    saveUser,
+    updateUserPortfolio,
+    getTradeHistory,
+    saveTradeHistory,
+    getPortfolioHistory,
+    savePortfolioHistory
+};

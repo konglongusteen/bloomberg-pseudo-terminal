@@ -6,13 +6,12 @@
 <title>Financial Terminal - 50 US Stocks</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&amp;family=JetBrains+Mono:wght@100..800&amp;display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body class="bg-black text-[#e2e2e2] h-full overflow-hidden select-none flex flex-col">
 
-<!-- Login overlay -->
 <div class="login-overlay" id="login-overlay">
 <div class="login-card">
 <h2 class="text-bbAmber font-bold text-xl mb-4 text-center">FINANCIAL TERMINAL</h2>
@@ -25,7 +24,6 @@
 </div>
 </div>
 
-<!-- Terminal interface -->
 <div class="h-screen flex flex-col overflow-hidden hidden" id="terminal-interface">
 <header class="bg-[#0a0a0a] border-b border-[#282828] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
 <div class="flex items-center space-x-2 sm:space-x-3">
@@ -47,18 +45,13 @@
         <!-- LEFT PANEL -->
         <div class="resize-pane" id="left-pane" style="flex: 3;">
             <div class="pane-content space-y-3">
-                <div class="bg-[#050505] border border-[#282828] p-2.5 flex flex-col shrink-0 cli-module">
-                    <div class="text-[10px] text-[#a0a0a0] mb-1 tracking-wider uppercase font-bold">Interactive Terminal Command System</div>
-                    <div class="flex bg-black border border-[#282828] focus-within:border-bbAmber transition p-1">
-                        <span class="text-bbAmber font-bold px-1.5 flex items-center select-none text-sm">&gt;</span>
-                        <input class="w-full bg-black text-bbAmber font-bold font-mono text-sm focus:outline-none uppercase py-0.5 px-1" id="terminal-cli" placeholder="Type command (e.g. AAPL, TSLA, PORT, HELP)..." type="text"/>
-                    </div>
-                </div>
+                <!-- CLI module removed -->
                 <div class="bg-[#050505] border border-[#282828] p-3 flex-1 flex flex-col min-h-0 watchlist-module">
                     <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0 flex-wrap gap-2">
                         <span class="text-bbAmber font-bold tracking-wider">WATCHLIST (50 US STOCKS)</span>
-                        <div class="flex items-center gap-2">
-                            <label class="flex items-center gap-1 text-[10px]"><input type="checkbox" id="favourite-filter"> Show favourites only</label>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <input type="text" id="search-input" placeholder="Search symbol/name" class="bg-black text-[10px] border border-[#282828] rounded px-2 py-1 w-28">
+                            <label class="flex items-center gap-1 text-[10px]"><input type="checkbox" id="favourite-filter"> ★ only</label>
                             <select id="filter-type" class="bg-black text-[10px] border border-[#282828] rounded px-1 py-0.5">
                                 <option value="all">All</option>
                                 <option value="gainers">Gainers</option>
@@ -78,14 +71,15 @@
                         <button class="text-[10px] text-bbAmber border border-bbAmber/40 px-1.5 py-0.5 rounded hover:bg-bbAmber/20" id="trade-history-btn">TRADE HISTORY</button>
                     </div>
                     <div class="flex justify-between items-center mb-2"><span class="text-green-500 font-bold">Cash:</span><span class="text-green-500 font-bold" id="portfolio-cash-lbl">$100,000.00</span></div>
+                    <div class="flex justify-between items-center mb-1 text-[10px] text-gray-400"><span>Last quote update:</span><span id="last-updated-timestamp">--:--:--</span></div>
                     <div id="trade-error-message" class="error-message hidden"></div>
                     <div class="grid grid-cols-2 gap-2 text-xs mb-2">
                         <div><label class="text-[9px] text-[#a0a0a0] block">ORDER TCKR</label><input class="w-full bg-black border border-[#282828] px-2 py-2 text-bbCyan focus:outline-none uppercase text-sm" id="trade-symbol" placeholder="AAPL" type="text"/></div>
                         <div><label class="text-[9px] text-[#a0a0a0] block">VOLUME SIZE</label><input class="w-full bg-black border border-[#282828] px-2 py-2 text-bbCyan focus:outline-none text-sm" id="trade-qty" min="1" placeholder="10" step="1" type="number" value="10"/></div>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
-                        <button class="bg-emerald-950 hover:bg-emerald-800 text-green-500 border border-green-500 font-bold py-1.5 transition text-xs rounded touch-manipulation" id="buy-btn">BUY</button>
-                        <button class="bg-red-950 hover:bg-red-900 text-red-500 border border-red-500 font-bold py-1.5 transition text-xs rounded touch-manipulation" id="sell-btn">SELL</button>
+                        <button class="bg-emerald-950 hover:bg-emerald-800 text-green-500 border border-green-500 font-bold py-1.5 transition text-xs rounded touch-manipulation" id="buy-btn">BUY (Ctrl+B)</button>
+                        <button class="bg-red-950 hover:bg-red-900 text-red-500 border border-red-500 font-bold py-1.5 transition text-xs rounded touch-manipulation" id="sell-btn">SELL (Ctrl+S)</button>
                     </div>
                     <div class="mt-2">
                         <button class="w-full bg-amber-950 hover:bg-amber-800 text-bbAmber border border-bbAmber font-bold py-1.5 transition text-xs rounded touch-manipulation" id="sell-all-btn">SELL ALL (current symbol)</button>
@@ -123,7 +117,8 @@
                     </div>
                     <div class="indicator-panel" id="indicator-panel">
                         <div class="indicator-card"><span class="indicator-label">RSI (14)</span><span class="indicator-value" id="rsi-value">--</span><span class="text-[9px]" id="rsi-signal">--</span></div>
-                        <div class="indicator-card"><span class="indicator-label">MA Crossover</span><span class="indicator-value" id="ma-status">--</span><span class="text-[9px]" id="ma-prediction">--</span></div>
+                        <div class="indicator-card"><span class="indicator-label">MACD</span><span class="indicator-value" id="macd-value">--</span><span class="text-[9px]" id="macd-signal">--</span></div>
+                        <div class="indicator-card"><span class="indicator-label">Bollinger Bands</span><span class="indicator-value" id="bb-status">--</span><span class="text-[9px]" id="bb-signal">--</span></div>
                         <div class="indicator-card"><span class="indicator-label">Forecast Model</span><select class="bg-black text-bbAmber text-xs border border-[#282828] rounded px-1" id="forecast-model"><option value="linear">Linear (Simple)</option><option value="arima">ARIMA (Backend)</option></select></div>
                         <div class="indicator-card"><span class="indicator-label">Forecast (5d)</span><span class="indicator-value" id="forecast-price">--</span><span class="text-[9px]" id="forecast-dir">--</span></div>
                     </div>
@@ -135,6 +130,10 @@
         <!-- RIGHT PANEL -->
         <div class="resize-pane" id="right-pane" style="flex: 3;">
             <div class="pane-content space-y-3">
+                <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col min-h-[200px]">
+                    <div class="text-bbAmber font-bold text-xs mb-1">PORTFOLIO VALUE HISTORY</div>
+                    <canvas id="portfolio-chart" height="150" class="w-full h-32"></canvas>
+                </div>
                 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col flex-1 min-h-0 relative ai-module" style="min-height: 320px;">
                     <div class="absolute top-0 right-0 w-16 h-0.5 bg-bbCyan"></div>
                     <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0"><span class="text-bbCyan font-bold tracking-wider">AI COPILOT</span><span class="text-[9px] bg-cyan-950 text-bbCyan px-1.5 py-0.5 rounded font-bold">GROQ</span></div>
@@ -155,16 +154,8 @@
 </div>
 </footer>
 
-<!-- Modals -->
 <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="trade-history-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-3xl rounded shadow-2xl relative"><div class="flex justify-between items-center border-b border-[#282828] p-3"><h3 class="text-bbAmber font-bold">TRADE HISTORY</h3><button class="text-gray-400 hover:text-white" onclick="closeTradeHistoryModal()">✖</button></div><div class="history-modal p-3"><div id="trade-history-list">No trades yet.</div></div></div></div>
-<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="help-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-lg p-5 rounded shadow-2xl relative"><h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-[#282828] pb-1 flex justify-between items-center"><span>COMMAND DIRECTORY</span><button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">✖</button></h2><div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] text-neutral-300"><p class="text-[#a0a0a0] mb-2">Enter commands in the header bar &amp; press Enter.</p><table class="w-full text-left"><thead><tr class="text-[#a0a0a0] border-b border-[#282828]"><th>COMMAND</th><th>ACTION</th></tr></thead><tbody>
-<tr><td class="text-bbAmber">AAPL</td><td>Switch focus to Apple</td></tr>
-<tr><td class="text-bbAmber">TSLA</td><td>Switch focus to Tesla</td></tr>
-<tr><td class="text-bbAmber">BUY AAPL 10</td><td>Buy 10 shares of AAPL</td></tr>
-<tr><td class="text-bbAmber">SELL TSLA 5</td><td>Sell 5 shares of TSLA</td></tr>
-<tr><td class="text-bbAmber">PORT</td><td>Show portfolio</td></tr>
-<tr><td class="text-bbAmber">HELP</td><td>This menu</td></tr>
-</tbody></table></div></div></div>
+<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="help-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-lg p-5 rounded shadow-2xl relative"><h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-[#282828] pb-1 flex justify-between items-center"><span>COMMAND DIRECTORY</span><button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">✖</button></h2><div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] text-neutral-300"><p class="text-[#a0a0a0] mb-2">Click on any symbol in the watchlist to view its chart. Use the BUY/SELL buttons or keyboard shortcuts (Ctrl+B / Ctrl+S / Ctrl+A).</p></div></div></div>
 
 <script src="app.js"></script>
 </body>
