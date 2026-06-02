@@ -131,44 +131,6 @@ async function loadPortfolioHistoryFromBackend() {
         }
     } catch(e) {}
 }
-function updatePortfolioChart() {
-    const ctx = document.getElementById('portfolio-chart')?.getContext('2d');
-    if (!ctx) return;
-    if (portfolioChart) portfolioChart.destroy();
-    const labels = portfolioHistory.map(h => h.timestamp);
-    const values = portfolioHistory.map(h => h.totalValue);
-    portfolioChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Portfolio Value ($)',
-                data: values,
-                borderColor: '#dfb257',
-                backgroundColor: 'rgba(223,178,87,0.1)',
-                fill: true,
-                tension: 0.1,
-                pointRadius: 3,          // show small dots
-                pointHoverRadius: 5,
-                pointBackgroundColor: '#dfb257',
-                pointBorderColor: '#ffffff',
-                pointBorderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { labels: { color: '#e2e2e2', font: { size: 10 } } },
-                tooltip: { enabled: true, mode: 'index', intersect: false }
-            },
-            scales: {
-                y: { ticks: { color: '#e2e2e2' }, grid: { color: '#282828' } },
-                x: { ticks: { color: '#e2e2e2', maxRotation: 45, autoSkip: true }, grid: { color: '#282828' } }
-            }
-        }
-    });
-}
 
 // ============================================================
 // 4. QUOTE CACHING & TIMESTAMP
@@ -732,14 +694,26 @@ function changeInterval(interval) { currentInterval = interval; ['1D','1W','1M',
 // 21. THEME TOGGLE (Light / Dark)
 // ============================================================
 function updatePortfolioChart() {
-    const ctx = document.getElementById('portfolio-chart')?.getContext('2d');
+    const canvas = document.getElementById('portfolio-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // If canvas has zero size, wait a bit and retry (fixes mobile disappearing)
+    if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+        console.warn('Portfolio chart canvas has zero size, retrying in 200ms');
+        setTimeout(() => updatePortfolioChart(), 200);
+        return;
+    }
+
     if (portfolioChart) portfolioChart.destroy();
+    
     const labels = portfolioHistory.map(h => h.timestamp);
     const values = portfolioHistory.map(h => h.totalValue);
     const isLightTheme = document.body.classList.contains('light-theme');
     const textColor = isLightTheme ? '#000000' : '#e2e2e2';
     const gridColor = isLightTheme ? '#dddddd' : '#282828';
+    
     portfolioChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -998,10 +972,28 @@ async function initTerminal() {
         }
     });
     if (window.innerWidth >= 769) initResizablePanes();
-    window.addEventListener('resize', () => { if (window.innerWidth >= 769) { if (!document.getElementById('handle1').hasListener) initResizablePanes(); } refreshChartSize(); });
+    window.addEventListener('resize', () => {
+        if (window.innerWidth >= 769) {
+            if (!document.getElementById('handle1').hasListener) initResizablePanes();
+        }
+        refreshChartSize();
+        // Redraw portfolio chart on resize (fixes mobile disappearance)
+        if (portfolioChart) {
+            setTimeout(() => updatePortfolioChart(), 100);
+        }
+    });
     enableHorizontalScroll();
     document.getElementById('apply-filter')?.addEventListener('click', applyWatchlistFilters);
     document.getElementById('favourite-filter')?.addEventListener('change', applyWatchlistFilters);
     document.getElementById('search-input')?.addEventListener('input', applyWatchlistFilters);
+    
+    // ADD THIS: ResizeObserver for portfolio chart canvas (mobile fix)
+    const portfolioCanvas = document.getElementById('portfolio-chart');
+    if (portfolioCanvas && window.ResizeObserver) {
+        new ResizeObserver(() => {
+            if (portfolioChart) {
+                setTimeout(() => updatePortfolioChart(), 100);
+            }
+        }).observe(portfolioCanvas);
+    }
 }
-window.toggleFavourite = toggleFavourite;

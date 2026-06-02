@@ -87,9 +87,16 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
     overflow-y: auto;
 }
 @media (max-width: 768px) and (orientation: portrait) {
-    .resizable-grid { flex-direction: column; gap: 16px; }
-    .resize-handle { display: none; }
-    .resize-pane { min-width: auto; }
+    /* Ensure portfolio chart canvas has a minimum height */
+    #portfolio-chart {
+        min-height: 150px !important;
+        height: auto !important;
+        width: 100% !important;
+    }
+    /* Also the parent container */
+    .bg-\[#050505\] .flex.flex-col.min-h-\[200px\] {
+        min-height: 180px !important;
+    }
 }
 @media (max-width: 768px) and (orientation: portrait) {
     .h-screen { height: auto !important; min-height: 100vh !important; overflow-y: visible !important; }
