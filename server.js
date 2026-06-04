@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const WebSocket = require('ws');
+const cron = require('node-cron');
 const { connectDb, getUsers, saveUser, updateUserPortfolio, getTradeHistory, saveTradeHistory, getPortfolioHistory, savePortfolioHistory } = require('./database');
 
 const app = express();
@@ -52,7 +53,7 @@ app.post('/api/auth/register', async (req, res) => {
     const saved = await saveUser(newUser);
     if (!saved) return res.status(500).json({ error: 'Registration failed' });
 
-    // ---------- Leaderboard reliability fix: save initial portfolio snapshot ----------
+    // Save initial portfolio snapshot for leaderboard
     const today = new Date().toISOString().split('T')[0];
     await savePortfolioHistory(username, today, 100000);
 
@@ -147,7 +148,6 @@ app.get('/api/leaderboard', authenticate, async (req, res) => {
             if (latestHistory.length > 0) {
                 totalValue = latestHistory[0].totalValue;
             } else {
-                // Fallback: cash only (should not happen after registration fix)
                 totalValue = user.portfolio?.cash || 0;
             }
 
@@ -179,6 +179,40 @@ app.get('/api/leaderboard', authenticate, async (req, res) => {
     }
 });
 
+// ---------- Automated Daily Snapshot (Cron Job) ----------
+cron.schedule('0 0 * * *', async () => {
+    console.log('Running daily portfolio snapshot cron job...');
+    try {
+        const db = await connectDb();
+        if (!db) throw new Error('Database not connected');
+
+        const users = await db.collection('users').find({}).toArray();
+        const today = new Date().toISOString().split('T')[0];
+
+        for (const user of users) {
+            const latestHistory = await db.collection('portfolio_history')
+                .find({ username: user.username })
+                .sort({ timestamp: -1 })
+                .limit(1)
+                .toArray();
+
+            let totalValue = user.portfolio?.cash || 0;
+            if (latestHistory.length > 0) {
+                totalValue = latestHistory[0].totalValue;
+            }
+
+            await db.collection('portfolio_history').updateOne(
+                { username: user.username, timestamp: today },
+                { $set: { totalValue } },
+                { upsert: true }
+            );
+        }
+        console.log(`Daily snapshot completed for ${users.length} users.`);
+    } catch (err) {
+        console.error('Daily snapshot cron job error:', err);
+    }
+});
+
 // ---------- Yahoo Finance Quote ----------
 app.get('/api/yahoo/quote', async (req, res) => {
     const { symbol } = req.query;
@@ -205,7 +239,6 @@ app.get('/api/yahoo/quote', async (req, res) => {
         });
     } catch (err) {
         console.error(`Yahoo quote error ${symbol}:`, err.message);
-        // Fallback to Finnhub if available
         if (FINNHUB_API_KEY) {
             try {
                 const finnUrl = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
@@ -289,26 +322,61 @@ app.get('/api/news', async (req, res) => {
     }
 });
 
-// ---------- Groq AI ----------
+// ---------- Groq AI (with slash commands & JSON actions) ----------
 app.post('/api/copilot/query', async (req, res) => {
     if (!GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY missing' });
     const { prompt } = req.body;
     if (!prompt) return res.status(400).json({ error: 'Prompt required' });
+    
+    // Check for slash command /buy or /sell
+    const slashMatch = prompt.match(/^\/(buy|sell)\s+(\d+(?:\.\d+)?)\s+([A-Z.^]+)$/i);
+    if (slashMatch) {
+        const action = slashMatch[1].toUpperCase();
+        const qty = parseFloat(slashMatch[2]);
+        const symbol = slashMatch[3].toUpperCase();
+        if (!isNaN(qty) && qty > 0) {
+            return res.json({ 
+                text: `✓ Executed ${action} order: ${qty} shares of ${symbol}.`,
+                action: { type: action, symbol, qty }
+            });
+        }
+    }
+    
+    // Otherwise, ask Groq to return JSON if the user wants to trade
     try {
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
                 model: 'llama-3.3-70b-versatile',
                 messages: [
-                    { role: 'system', content: 'You are a financial AI assistant. Answer concisely.' },
+                    { 
+                        role: 'system', 
+                        content: `You are a financial AI assistant. If the user asks to buy or sell a specific stock with a quantity, respond ONLY with a JSON object like: {"action":"BUY","symbol":"AAPL","qty":10}. If the user asks a general question, respond with normal text. Do not add any extra text.` 
+                    },
                     { role: 'user', content: prompt }
                 ],
-                temperature: 0.7,
-                max_tokens: 500
+                temperature: 0.3,
+                max_tokens: 200
             },
             { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
         );
-        res.json({ text: response.data.choices[0].message.content });
+        
+        let content = response.data.choices[0].message.content;
+        // Try to parse JSON
+        try {
+            const jsonMatch = content.match(/\{.*\}/s);
+            if (jsonMatch) {
+                const actionObj = JSON.parse(jsonMatch[0]);
+                if (actionObj.action && actionObj.symbol && actionObj.qty) {
+                    return res.json({ 
+                        text: `✓ ${actionObj.action} order: ${actionObj.qty} shares of ${actionObj.symbol}.`,
+                        action: actionObj
+                    });
+                }
+            }
+        } catch(e) {}
+        
+        res.json({ text: content });
     } catch (err) {
         console.error('Groq error:', err.response?.data || err.message);
         res.status(500).json({ error: 'AI service error' });
@@ -390,10 +458,11 @@ app.get('/api/forecast/arima', async (req, res) => {
     }
 });
 
-// ---------- WebSocket (simulated live prices) ----------
+// ---------- WebSocket (simulated live prices, order book removed) ----------
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const wss = new WebSocket.Server({ server });
 const subscribers = new Map();
+
 wss.on('connection', ws => {
     ws.on('message', msg => {
         try {
@@ -411,6 +480,7 @@ wss.on('connection', ws => {
         }
     });
 });
+
 setInterval(async () => {
     for (const [symbol, clients] of subscribers.entries()) {
         if (clients.size === 0) continue;
@@ -423,7 +493,11 @@ setInterval(async () => {
         } catch(e) {}
         const change = (Math.random() - 0.5) * price * 0.01;
         const newPrice = price + change;
-        const msg = JSON.stringify({ type: 'trade', symbol, price: newPrice });
+        const msg = JSON.stringify({
+            type: 'trade',
+            symbol,
+            price: newPrice
+        });
         clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
     }
 }, 5000);

@@ -62,7 +62,24 @@ loginSubmit.onclick = async () => {
 };
 document.getElementById('logout-btn').onclick = () => { authToken = null; currentUser = null; terminalInterface.classList.add('hidden'); loginOverlay.classList.remove('hidden'); loginUsername.value = ''; loginPassword.value = ''; loginConfirm.value = ''; setAuthMode(true); };
 async function syncPortfolioToBackend() { if (!authToken) return; try { await fetch('/api/portfolio/sync', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({ portfolio: portfolio }) }); } catch(e) {} }
-async function loadPortfolioFromBackend() { if (!authToken) return; try { const response = await fetch('/api/portfolio', { headers: { 'Authorization': `Bearer ${authToken}` } }); if (response.ok) { const data = await response.json(); if (data.portfolio) { portfolio = data.portfolio; localStorage.setItem('bb_portfolio', JSON.stringify(portfolio)); updatePortfolioDisplay(); } } } catch(e) {} }
+async function loadPortfolioFromBackend() {
+    if (!authToken) return;
+    try {
+        const response = await fetch('/api/portfolio', { headers: { 'Authorization': `Bearer ${authToken}` } });
+        if (response.ok) {
+            const data = await response.json();
+            if (data.portfolio) {
+                portfolio = data.portfolio;
+                localStorage.setItem('bb_portfolio', JSON.stringify(portfolio));
+                updatePortfolioDisplay();
+                // Force composition update (ignore state check) and retry
+                updatePortfolioComposition(0, true);
+                setTimeout(() => updatePortfolioComposition(0, true), 3000);
+                setTimeout(() => updatePortfolioComposition(0, true), 6000);
+            }
+        }
+    } catch(e) {}
+}
 
 // ============================================================
 // 2. TRADE HISTORY SYNC (MongoDB)
@@ -94,16 +111,28 @@ function addTradeRecord(symbol, action, qty, price, pnl = null) {
 }
 
 // ============================================================
-// 3. PORTFOLIO VALUE HISTORY (Chart)
+// 3. PORTFOLIO VALUE HISTORY (Chart) with interval selector
 // ============================================================
 let portfolioHistory = [];
 let portfolioChart = null;
-async function savePortfolioValueSnapshot() {
+let portfolioHistoryRange = '1M';
+
+async function savePortfolioValueSnapshot(retry = 0) {
     if (!authToken) return;
+    let missingPrices = false;
     let totalValue = portfolio.cash;
     for (const [sym, h] of Object.entries(portfolio.holdings)) {
-        const currentPrice = priceCache[sym]?.price || 0;
-        totalValue += h.qty * currentPrice;
+        const price = priceCache[sym]?.price;
+        if (!price || isNaN(price)) {
+            missingPrices = true;
+            break;
+        }
+        totalValue += h.qty * price;
+    }
+    if (missingPrices && retry < 5) {
+        console.log(`Missing prices for some holdings, retrying snapshot in 1 second... (attempt ${retry + 1})`);
+        setTimeout(() => savePortfolioValueSnapshot(retry + 1), 1000);
+        return;
     }
     const timestamp = new Date().toISOString().split('T')[0];
     try {
@@ -122,6 +151,7 @@ async function savePortfolioValueSnapshot() {
         updatePortfolioChart();
     } catch(e) { console.warn('Failed to save portfolio snapshot:', e); }
 }
+
 async function loadPortfolioHistoryFromBackend() {
     if (!authToken) return;
     try {
@@ -129,11 +159,104 @@ async function loadPortfolioHistoryFromBackend() {
         if (res.ok) {
             const data = await res.json();
             portfolioHistory = data.history || [];
+            if (portfolioHistory.length === 0) {
+                // Create a fallback entry from current portfolio value
+                let totalValue = portfolio.cash;
+                for (const [sym, h] of Object.entries(portfolio.holdings)) {
+                    const price = priceCache[sym]?.price;
+                    if (price && !isNaN(price)) totalValue += h.qty * price;
+                }
+                const today = new Date().toISOString().split('T')[0];
+                portfolioHistory.push({ timestamp: today, totalValue });
+            }
             updatePortfolioChart();
         }
     } catch(e) {}
 }
 
+function getPortfolioHistoryFiltered() {
+    if (!portfolioHistory.length) return [];
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    let startDate = new Date(todayUTC);
+    
+    switch (portfolioHistoryRange) {
+        case '1W':
+            startDate.setUTCDate(todayUTC.getUTCDate() - 7);
+            break;
+        case '1M':
+            startDate.setUTCMonth(todayUTC.getUTCMonth() - 1);
+            break;
+        case '3M':
+            startDate.setUTCMonth(todayUTC.getUTCMonth() - 3);
+            break;
+        default:
+            return portfolioHistory;
+    }
+    const startStr = startDate.toISOString().split('T')[0];
+    const filtered = portfolioHistory.filter(h => h.timestamp >= startStr);
+    // If filtering removed everything but we have data, show the most recent day
+    if (filtered.length === 0 && portfolioHistory.length > 0) {
+        return [portfolioHistory[portfolioHistory.length - 1]];
+    }
+    return filtered;
+}
+
+function updatePortfolioChart() {
+    const canvas = document.getElementById('portfolio-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+        setTimeout(() => updatePortfolioChart(), 200);
+        return;
+    }
+    if (portfolioChart) portfolioChart.destroy();
+    
+    const filteredHistory = getPortfolioHistoryFiltered();  // renamed to avoid conflict
+    const labels = filteredHistory.map(h => h.timestamp);
+    const values = filteredHistory.map(h => h.totalValue);
+    const isLightTheme = document.body.classList.contains('light-theme');
+    const textColor = isLightTheme ? '#000000' : '#e2e2e2';
+    const gridColor = isLightTheme ? '#dddddd' : '#282828';
+    
+    portfolioChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Portfolio Value ($)',
+                data: values,
+                borderColor: '#dfb257',
+                backgroundColor: 'rgba(223,178,87,0.1)',
+                fill: true,
+                tension: 0.1,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                pointBackgroundColor: '#dfb257',
+                pointBorderColor: isLightTheme ? '#000000' : '#ffffff',
+                pointBorderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { labels: { color: textColor, font: { size: 10 } } },
+                tooltip: { enabled: true, mode: 'index', intersect: false }
+            },
+            scales: {
+                y: { ticks: { color: textColor }, grid: { color: gridColor } },
+                x: { ticks: { color: textColor, maxRotation: 45, autoSkip: true }, grid: { color: gridColor } }
+            }
+        }
+    });
+}
+
+function setPortfolioHistoryRange(range) {
+    portfolioHistoryRange = range;
+    updatePortfolioChart();
+}
 // ============================================================
 // 4. QUOTE CACHING & TIMESTAMP
 // ============================================================
@@ -174,11 +297,18 @@ function applyWsUpdates() {
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}`);
-    ws.onopen = () => { reconnectAttempts = 0; watchlistSymbols.forEach(sym => ws.send(JSON.stringify({ type: 'subscribe', symbol: sym }))); };
+    ws.onopen = () => { 
+        reconnectAttempts = 0; 
+        watchlistSymbols.forEach(sym => ws.send(JSON.stringify({ type: 'subscribe', symbol: sym }))); 
+    };
     ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
         if (data.type === 'trade') {
             pendingWsUpdates[data.symbol] = data.price;
+            // Render order book for current symbol if data contains bids/asks
+            if (data.bids && data.asks && data.symbol === currentSymbol) {
+                renderOrderBook(data.bids, data.asks, data.price);
+            }
             if (wsRafId === null) wsRafId = requestAnimationFrame(applyWsUpdates);
         }
     };
@@ -190,7 +320,6 @@ function connectWebSocket() {
         reconnectAttempts++;
     };
 }
-
 // ============================================================
 // 6. HISTORICAL DATA CACHE
 // ============================================================
@@ -202,6 +331,84 @@ function setCachedCandles(symbol, days, candles) { localStorage.setItem(`candles
 // 7. HAPTIC FEEDBACK
 // ============================================================
 function haptic() { if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(100); }
+
+// ============================================================
+// 8. PORTFOLIO COMPOSITION PIE CHART (optimised with retry)
+// ============================================================
+let compositionChart = null;
+let lastPortfolioState = null;
+
+function updatePortfolioComposition(retry = 0, force = false) {
+    const currentState = JSON.stringify({ cash: portfolio.cash, holdings: portfolio.holdings });
+    if (!force && lastPortfolioState === currentState && compositionChart !== null) return;
+    if (!force) lastPortfolioState = currentState;
+    
+    const canvas = document.getElementById('portfolio-composition-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    const totalCash = portfolio.cash;
+    let totalHoldingsValue = 0;
+    const holdingsData = [];
+    const labels = [];
+    let missingPrices = false;
+    for (const [sym, h] of Object.entries(portfolio.holdings)) {
+        const price = priceCache[sym]?.price;
+        if (!price || isNaN(price)) {
+            missingPrices = true;
+            continue;
+        }
+        const value = h.qty * price;
+        if (value > 0) {
+            holdingsData.push(value);
+            labels.push(sym);
+            totalHoldingsValue += value;
+        }
+    }
+    const total = totalCash + totalHoldingsValue;
+    
+    if (Object.keys(portfolio.holdings).length > 0 && total === 0 && missingPrices && retry < 15) {
+        setTimeout(() => updatePortfolioComposition(retry + 1, force), 1000);
+        return;
+    }
+    
+    if (total === 0) {
+        if (compositionChart) compositionChart.destroy();
+        compositionChart = null;
+        return;
+    }
+    const percentages = holdingsData.map(v => (v / total) * 100);
+    const dataValues = [...holdingsData];
+    const dataLabels = [...labels];
+    if (totalCash > 0) {
+        dataValues.unshift(totalCash);
+        dataLabels.unshift('Cash');
+        percentages.unshift((totalCash / total) * 100);
+    }
+    const isLightTheme = document.body.classList.contains('light-theme');
+    const textColor = isLightTheme ? '#000000' : '#e2e2e2';
+    if (compositionChart) compositionChart.destroy();
+    compositionChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: dataLabels,
+            datasets: [{
+                data: dataValues,
+                backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec489a', '#06b6d4'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { color: textColor, font: { size: 9 } } },
+                tooltip: { callbacks: { label: (ctx) => `${ctx.label}: $${ctx.raw.toFixed(2)} (${ctx.raw === totalCash ? 'Cash' : percentages[ctx.dataIndex].toFixed(1)}%)` } }
+            }
+        }
+    });
+}
 
 // ============================================================
 // 9. WATCHLIST FILTERS
@@ -253,10 +460,27 @@ function getAssetType(sym) {
 }
 
 // ============================================================
+// 10b. TOTAL PRICE PREVIEW
+// ============================================================
+function updateTotalPreview() {
+    const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
+    const qty = parseFloat(document.getElementById('trade-qty').value);
+    const price = priceCache[sym]?.price;
+    const totalSpan = document.getElementById('trade-total-preview');
+    if (!totalSpan) return;
+    if (!sym || isNaN(qty) || qty <= 0 || !price || isNaN(price)) {
+        totalSpan.innerText = '$0.00';
+        return;
+    }
+    const total = price * qty;
+    totalSpan.innerText = `$${total.toFixed(2)}`;
+}
+
+// ============================================================
 // 11. PORTFOLIO DISPLAY & TOP MOVERS
 // ============================================================
 function updateTopMovers() { const gainers = [], losers = []; for (const sym of watchlistSymbols) { const data = priceCache[sym]; if (data && typeof data.changePct === 'number' && !isNaN(data.changePct)) { if (data.changePct >= 0) gainers.push({ sym, pct: data.changePct }); else losers.push({ sym, pct: data.changePct }); } } gainers.sort((a,b) => b.pct - a.pct); losers.sort((a,b) => a.pct - b.pct); document.getElementById('gainers-list').innerHTML = gainers.slice(0,5).map(g => `<div class="mover-item"><span>${g.sym}</span><span class="text-green-500">+${g.pct.toFixed(2)}%</span></div>`).join('') || 'None'; document.getElementById('losers-list').innerHTML = losers.slice(0,5).map(l => `<div class="mover-item"><span>${l.sym}</span><span class="text-red-500">${l.pct.toFixed(2)}%</span></div>`).join('') || 'None'; }
-function showTradeHistoryModal() { const container = document.getElementById('trade-history-list'); if (!tradeHistory.length) container.innerHTML = '<div class="text-gray-500 text-center">No trades recorded.</div>'; else { let html = '<table class="history-table"><thead><tr><th>Date</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>P&L</th></tr></thead><tbody>'; tradeHistory.forEach(t => { const pnlClass = t.pnl && t.pnl > 0 ? 'text-green-500' : (t.pnl && t.pnl < 0 ? 'text-red-500' : 'text-gray-400'); html += `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.symbol}</td><td class="${t.action === 'BUY' ? 'text-green-500' : 'text-red-500'}">${t.action}</td><td>${t.qty}</td><td>$${t.price.toFixed(2)}</td><td class="${pnlClass}">${t.pnl ? `$${t.pnl.toFixed(2)}` : '—'}</tr></tr>`; }); html += '</tbody></table>'; container.innerHTML = html; } document.getElementById('trade-history-modal').classList.remove('hidden'); }
+function showTradeHistoryModal() { const container = document.getElementById('trade-history-list'); if (!tradeHistory.length) container.innerHTML = '<div class="text-gray-500 text-center">No trades recorded.</div>'; else { let html = '<table class="history-table"><thead><tr><th>Date</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>P&L</th></tr></thead><tbody>'; tradeHistory.forEach(t => { const pnlClass = t.pnl && t.pnl > 0 ? 'text-green-500' : (t.pnl && t.pnl < 0 ? 'text-red-500' : 'text-gray-400'); html += `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.symbol}</td><td class="${t.action === 'BUY' ? 'text-green-500' : 'text-red-500'}">${t.action}</td><td>${t.qty}</td><td>$${t.price.toFixed(2)}</td><td class="${pnlClass}">${t.pnl ? `$${t.pnl.toFixed(2)}` : '—'}</td></tr>`; }); html += '</tbody></table>'; container.innerHTML = html; } document.getElementById('trade-history-modal').classList.remove('hidden'); }
 function closeTradeHistoryModal() { document.getElementById('trade-history-modal').classList.add('hidden'); }
 
 // ============================================================
@@ -293,7 +517,6 @@ function executeQuickTrade(action) {
     let qty = parseFloat(document.getElementById('trade-qty').value);
     const errorDiv = document.getElementById('trade-error-message');
     if (!priceCache[sym] || isNaN(qty) || qty <= 0) { errorDiv.innerText = 'Invalid symbol or quantity'; errorDiv.classList.remove('hidden'); setTimeout(() => errorDiv.classList.add('hidden'), 3000); return; }
-    // Allow up to 4 decimal places
     qty = parseFloat(qty.toFixed(4));
     const price = priceCache[sym].price;
     const total = price * qty;
@@ -322,6 +545,13 @@ function executeQuickTrade(action) {
     errorDiv.classList.add('hidden');
     haptic();
 }
+
+// Helper for AI action buttons (used by dynamically created buttons)
+function executeAIAction(action, symbol, qty) {
+    document.getElementById('trade-symbol').value = symbol;
+    document.getElementById('trade-qty').value = qty;
+    executeQuickTrade(action);
+}
 window.executeQuickTrade = executeQuickTrade;
 document.getElementById('buy-btn').onclick = () => executeQuickTrade('BUY');
 document.getElementById('sell-btn').onclick = () => executeQuickTrade('SELL');
@@ -346,6 +576,7 @@ window.updatePortfolioDisplay = function() {
         </span>`;
     }
     updateTopMovers();
+    updatePortfolioComposition();
 };
 
 // ============================================================
@@ -365,6 +596,7 @@ async function loadQuote(symbol) {
         if (cached && typeof cached.price === 'number' && !isNaN(cached.price)) {
             priceCache[symbol] = cached;
             if (symbol === currentSymbol) updateQuotePanel(cached);
+            updateTotalPreview();
             return cached;
         } else {
             delete quoteCache[symbol];
@@ -384,6 +616,7 @@ async function loadQuote(symbol) {
             priceCache[symbol] = quoteData;
             quoteCache[symbol] = { timestamp: now, data: quoteData };
             if (symbol === currentSymbol) updateQuotePanel(quoteData);
+            updateTotalPreview();
             lastQuoteTimestamp = now;
             updateLastUpdatedTimestamp();
             return quoteData;
@@ -393,6 +626,7 @@ async function loadQuote(symbol) {
     } catch (err) {
         console.warn(`Yahoo quote failed for ${symbol}:`, err.message);
         if (symbol === currentSymbol) updateQuotePanel(null);
+        updateTotalPreview();
         return null;
     }
 }
@@ -505,7 +739,7 @@ function updateIndicators(candles) {
 }
 
 // ============================================================
-// SAFE QUOTE PANEL UPDATE (no toFixed errors on change/changePct)
+// SAFE QUOTE PANEL UPDATE (no market cap/PE)
 // ============================================================
 function updateQuotePanel(data) {
     const priceEl = document.getElementById('stock-price');
@@ -515,7 +749,6 @@ function updateQuotePanel(data) {
     if (!priceEl || !changeEl || !changePctEl) return;
     
     try {
-        // Validate all required numeric fields
         const isValid = data && 
                         typeof data.price === 'number' && !isNaN(data.price) &&
                         typeof data.change === 'number' && !isNaN(data.change) &&
@@ -528,6 +761,7 @@ function updateQuotePanel(data) {
             priceEl.className = 'text-lg font-bold text-gray-500 font-mono';
             changeEl.className = 'text-gray-500 font-bold font-mono';
             changePctEl.className = 'text-gray-500 text-[10px] font-mono';
+            updateTotalPreview();
             return;
         }
         
@@ -538,6 +772,7 @@ function updateQuotePanel(data) {
         priceEl.className = `text-lg font-bold ${cls} font-mono`;
         changeEl.className = `${cls} font-bold font-mono`;
         changePctEl.className = `${cls} text-[10px] font-mono`;
+        updateTotalPreview();
     } catch (err) {
         console.warn('updateQuotePanel error:', err);
         priceEl.innerText = '---';
@@ -546,6 +781,7 @@ function updateQuotePanel(data) {
         priceEl.className = 'text-lg font-bold text-gray-500 font-mono';
         changeEl.className = 'text-gray-500 font-bold font-mono';
         changePctEl.className = 'text-gray-500 text-[10px] font-mono';
+        updateTotalPreview();
     }
 }
 
@@ -692,16 +928,31 @@ async function loadChartData(symbol, days) {
 }
 
 // ============================================================
-// 20. WATCHLIST RENDERING
+// 20. WATCHLIST RENDERING (with loading skeleton)
 // ============================================================
-async function renderWatchlist() {
+function showWatchlistSkeleton() {
     const container = document.getElementById('watchlist-container');
-    container.innerHTML = '<div class="watchlist-placeholder">Loading symbols...</div>';
+    if (!container) return;
+    const skeletonHtml = `
+        <div class="animate-pulse">
+            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
+            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
+            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
+            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
+            <div class="h-8 bg-neutral-800 rounded"></div>
+        </div>
+    `;
+    container.innerHTML = skeletonHtml;
+}
+
+async function renderWatchlist() {
+    showWatchlistSkeleton();
     const table = document.createElement('table');
     table.className = "w-full text-left text-xs font-mono";
     table.innerHTML = `<thead><tr class="text-[#a0a0a0] text-[10px] border-b border-[#282828]/40">
         <th class="pb-1">★</th><th class="pb-1">SYMBOL / COMPANY</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th>
-      </tr></thead><tbody id="watchlist-tbody"></tbody>`;
+       </tr></thead><tbody id="watchlist-tbody"></tbody>`;
+    const container = document.getElementById('watchlist-container');
     container.innerHTML = '';
     container.appendChild(table);
     const tbody = document.getElementById('watchlist-tbody');
@@ -734,6 +985,12 @@ async function renderWatchlist() {
     applyWatchlistFilters();
     if (tbody.children.length === 0) container.innerHTML = '<div class="watchlist-placeholder">No quote data – check Finnhub API key and backend.</div>';
 }
+
+function refreshAllQuotes() {
+    quoteCache = {};
+    renderWatchlist();
+}
+
 function updateWatchlistRow(sym, data) {
     const row = document.getElementById(`wst-row-${sym}`);
     if (!row || !data) return;
@@ -748,60 +1005,12 @@ function updateWatchlistRow(sym, data) {
         cells[4].className = `py-1.5 text-right align-middle font-bold ${cls}`;
     }
 }
-async function changeActiveSymbol(symbol) { currentSymbol = symbol; document.getElementById('stock-symbol').innerText = symbol; document.getElementById('trade-symbol').value = symbol; await loadQuote(symbol); let days = 30; if (currentInterval === '1D') days = 1; else if (currentInterval === '1W') days = 7; else if (currentInterval === '3M') days = 90; else days = 30; await loadChartData(symbol, days); }
+async function changeActiveSymbol(symbol) { currentSymbol = symbol; document.getElementById('stock-symbol').innerText = symbol; document.getElementById('trade-symbol').value = symbol; await loadQuote(symbol); let days = 30; if (currentInterval === '1D') days = 1; else if (currentInterval === '1W') days = 7; else if (currentInterval === '3M') days = 90; else days = 30; await loadChartData(symbol, days); updateTotalPreview(); }
 function changeInterval(interval) { currentInterval = interval; ['1D','1W','1M','3M'].forEach(btn => { const el = document.getElementById(`btn-${btn}`); if (el) el.className = btn === interval ? 'px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold text-[10px]' : 'px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded text-[10px]'; }); let days = 30; if (interval === '1D') days = 1; else if (interval === '1W') days = 7; else if (interval === '3M') days = 90; else days = 30; loadChartData(currentSymbol, days); }
 
 // ============================================================
 // 21. THEME TOGGLE
 // ============================================================
-function updatePortfolioChart() {
-    const canvas = document.getElementById('portfolio-chart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
-        console.warn('Portfolio chart canvas has zero size, retrying in 200ms');
-        setTimeout(() => updatePortfolioChart(), 200);
-        return;
-    }
-    if (portfolioChart) portfolioChart.destroy();
-    const labels = portfolioHistory.map(h => h.timestamp);
-    const values = portfolioHistory.map(h => h.totalValue);
-    const isLightTheme = document.body.classList.contains('light-theme');
-    const textColor = isLightTheme ? '#000000' : '#e2e2e2';
-    const gridColor = isLightTheme ? '#dddddd' : '#282828';
-    portfolioChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Portfolio Value ($)',
-                data: values,
-                borderColor: '#dfb257',
-                backgroundColor: 'rgba(223,178,87,0.1)',
-                fill: true,
-                tension: 0.1,
-                pointRadius: 3,
-                pointHoverRadius: 5,
-                pointBackgroundColor: '#dfb257',
-                pointBorderColor: isLightTheme ? '#000000' : '#ffffff',
-                pointBorderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { labels: { color: textColor, font: { size: 10 } } },
-                tooltip: { enabled: true, mode: 'index', intersect: false }
-            },
-            scales: {
-                y: { ticks: { color: textColor }, grid: { color: gridColor } },
-                x: { ticks: { color: textColor, maxRotation: 45, autoSkip: true }, grid: { color: gridColor } }
-            }
-        }
-    });
-}
 function setTheme(theme) {
     try {
         if (theme === 'light') {
@@ -825,6 +1034,10 @@ function setTheme(theme) {
                 portfolioChart.options.scales.x.grid.color = '#dddddd';
                 portfolioChart.update();
             }
+            if (compositionChart) {
+                compositionChart.options.plugins.legend.labels.color = '#000000';
+                compositionChart.update();
+            }
         } else {
             document.body.classList.remove('light-theme');
             if (chart) {
@@ -845,6 +1058,10 @@ function setTheme(theme) {
                 portfolioChart.options.scales.y.grid.color = '#282828';
                 portfolioChart.options.scales.x.grid.color = '#282828';
                 portfolioChart.update();
+            }
+            if (compositionChart) {
+                compositionChart.options.plugins.legend.labels.color = '#e2e2e2';
+                compositionChart.update();
             }
         }
         localStorage.setItem('theme', theme);
@@ -876,7 +1093,57 @@ async function fetchNews() { const container = document.getElementById('news-con
 function getTimeAgo(date) { const seconds = Math.floor((new Date() - date) / 1000); if (seconds < 60) return 'just now'; const minutes = Math.floor(seconds / 60); if (minutes < 60) return `${minutes} min ago`; const hours = Math.floor(minutes / 60); if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`; const days = Math.floor(hours / 24); return `${days} day${days > 1 ? 's' : ''} ago`; }
 function escapeHtml(str) { if (!str) return ''; return String(str).replace(/[&<>]/g, m => m === '&' ? '&amp;' : (m === '<' ? '&lt;' : (m === '>' ? '&gt;' : m))); }
 function appendCopilotMessage(sender, text, colorClass = '') { const chat = document.getElementById('copilot-chat'); const div = document.createElement('div'); div.className = `p-2 rounded ${colorClass} bg-neutral-900/50 mb-1`; div.innerHTML = `<strong class="text-bbCyan block text-[10px]">${sender}</strong><div class="whitespace-pre-wrap">${text}</div>`; chat.appendChild(div); chat.scrollTop = chat.scrollHeight; }
-async function sendCopilotMessage() { const input = document.getElementById('copilot-input'); const prompt = input.value.trim(); if (!prompt) return; if (isRateLimited()) { appendCopilotMessage('SYSTEM', 'Rate limit (3 queries per minute). Please wait.', 'text-red-500'); return; } aiTimestamps.push(Date.now()); appendCopilotMessage('YOU', prompt, 'text-bbAmber'); input.value = ''; try { const res = await fetch(AI_PROXY, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) }); const data = await res.json(); if (data.text) appendCopilotMessage('AI', data.text, 'text-bbCyan'); else appendCopilotMessage('ERROR', data.error || 'No response.', 'text-red-500'); } catch (err) { console.error(err); appendCopilotMessage('ERROR', 'AI proxy error.', 'text-red-500'); } }
+async function sendCopilotMessage() {
+    const input = document.getElementById('copilot-input');
+    const prompt = input.value.trim();
+    if (!prompt) return;
+    if (isRateLimited()) {
+        appendCopilotMessage('SYSTEM', 'Rate limit (3 queries per minute). Please wait.', 'text-red-500');
+        return;
+    }
+    aiTimestamps.push(Date.now());
+    appendCopilotMessage('YOU', prompt, 'text-bbAmber');
+    input.value = '';
+    
+    try {
+        const res = await fetch(AI_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+        });
+        const data = await res.json();
+        if (data.action) {
+            // Execute trade automatically
+            const { type, symbol, qty } = data.action;
+            document.getElementById('trade-symbol').value = symbol;
+            document.getElementById('trade-qty').value = qty;
+            executeQuickTrade(type);
+            appendCopilotMessage('AI', data.text, 'text-bbCyan');
+        } else if (data.text) {
+            // Check if text contains actionable patterns and add buttons
+            let html = data.text;
+            const tradeMatch = html.match(/(?:buy|sell)\s+(\d+(?:\.\d+)?)\s+([A-Z.^]+)/gi);
+            if (tradeMatch) {
+                html += '<div class="flex flex-wrap gap-2 mt-2">';
+                for (const match of tradeMatch) {
+                    const parts = match.split(' ');
+                    const action = parts[0].toUpperCase();
+                    const qty = parseFloat(parts[1]);
+                    const symbol = parts[2].toUpperCase();
+                    html += `<button class="bg-bbAmber text-black px-2 py-1 rounded text-[9px] hover:bg-bbAmber/80 transition" onclick="executeAIAction('${action}', '${symbol}', ${qty})">${match}</button>`;
+                }
+                html += '</div>';
+            }
+            appendCopilotMessage('AI', html, 'text-bbCyan');
+        } else {
+            appendCopilotMessage('ERROR', data.error || 'No response.', 'text-red-500');
+        }
+    } catch (err) {
+        console.error(err);
+        appendCopilotMessage('ERROR', 'AI proxy error.', 'text-red-500');
+    }
+}
+
 function toggleHelpModal() { document.getElementById('help-modal').classList.toggle('hidden'); }
 function updateClock() { document.getElementById('terminal-clock').innerText = new Date().toUTCString().replace('GMT', 'UTC'); }
 setInterval(updateClock, 1000); updateClock();
@@ -994,7 +1261,13 @@ async function initTerminal() {
     initChart();
     await renderWatchlist();
     await changeActiveSymbol('AAPL');
-    await savePortfolioValueSnapshot();
+
+    // Force-load prices for all holdings before saving snapshot
+    const holdingsSymbols = Object.keys(portfolio.holdings);
+    if (holdingsSymbols.length > 0) {
+        await Promise.all(holdingsSymbols.map(sym => loadQuote(sym)));
+    }
+    await savePortfolioValueSnapshot();   // this will retry if prices still missing
     connectWebSocket();
     setInterval(() => updatePortfolioDisplay(), 3000);
     fetchNews();
@@ -1004,6 +1277,18 @@ async function initTerminal() {
     document.getElementById('trade-history-btn').onclick = showTradeHistoryModal;
     document.getElementById('leaderboard-btn')?.addEventListener('click', showLeaderboard);
     document.getElementById('asset-filter')?.addEventListener('change', applyWatchlistFilters);
+    document.getElementById('refresh-quotes-btn')?.addEventListener('click', refreshAllQuotes);
+// After other event listeners
+document.getElementById('refresh-correlation')?.addEventListener('click', () => updateCorrelationMatrix());
+// Initial correlation load after portfolio is ready
+setTimeout(() => updateCorrelationMatrix(), 5000);
+setInterval(() => updateCorrelationMatrix(), 60000); // refresh every minute
+    
+    // Portfolio history range buttons
+    document.getElementById('portfolio-range-1w')?.addEventListener('click', () => setPortfolioHistoryRange('1W'));
+    document.getElementById('portfolio-range-1m')?.addEventListener('click', () => setPortfolioHistoryRange('1M'));
+    document.getElementById('portfolio-range-3m')?.addEventListener('click', () => setPortfolioHistoryRange('3M'));
+    
     document.getElementById('forecast-model')?.addEventListener('change', async () => {
         if (currentCandles.length) {
             try {
@@ -1051,10 +1336,31 @@ async function initTerminal() {
         }).observe(portfolioCanvas);
     }
     reorderMobileLayout();
+    // Force an initial portfolio composition update (ignore state check)
+    updatePortfolioComposition(0, true);
+    
+    // Additional delayed composition update to catch late quotes
+    setTimeout(() => updatePortfolioComposition(0, true), 3000);
+    setTimeout(() => updatePortfolioComposition(0, true), 6000);
+
+    // Total preview event listeners
+    const tradeQtyInput = document.getElementById('trade-qty');
+    if (tradeQtyInput) {
+        tradeQtyInput.addEventListener('input', updateTotalPreview);
+    }
+    const tradeSymbolInput = document.getElementById('trade-symbol');
+    if (tradeSymbolInput) {
+        tradeSymbolInput.addEventListener('change', updateTotalPreview);
+    }
+    updateTotalPreview();
+    // Initialize Strategy Builder (backtester)
+    if (typeof initBacktester === 'function') {
+        initBacktester();
+    }
 }
 
 // ============================================================
-// MOBILE LAYOUT REORDERING
+// MOBILE LAYOUT REORDERING (includes pie chart)
 // ============================================================
 function reorderMobileLayout() {
     const isPortrait = window.innerHeight > window.innerWidth;
@@ -1065,7 +1371,8 @@ function reorderMobileLayout() {
         const watchlist = document.querySelector('.watchlist-module');
         const chart = document.querySelector('.chart-module');
         const trade = document.querySelector('.trade-module');
-        const portfolioChartContainer = document.getElementById('portfolio-history-container');
+        const portfolioLineChart = document.getElementById('portfolio-history-container');
+        const portfolioPieChart = document.getElementById('portfolio-composition-container');
         const ai = document.querySelector('.ai-module');
         const news = document.querySelector('.news-module');
         
@@ -1084,7 +1391,8 @@ function reorderMobileLayout() {
         if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
         if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
         if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
-        if (portfolioChartContainer && portfolioChartContainer.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioChartContainer);
+        if (portfolioLineChart && portfolioLineChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioLineChart);
+        if (portfolioPieChart && portfolioPieChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioPieChart);
         if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
         if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
         
@@ -1097,7 +1405,8 @@ function reorderMobileLayout() {
             const watchlist = document.querySelector('.watchlist-module');
             const chart = document.querySelector('.chart-module');
             const trade = document.querySelector('.trade-module');
-            const portfolioChartContainer = document.getElementById('portfolio-history-container');
+            const portfolioLineChart = document.getElementById('portfolio-history-container');
+            const portfolioPieChart = document.getElementById('portfolio-composition-container');
             const ai = document.querySelector('.ai-module');
             const news = document.querySelector('.news-module');
             
@@ -1111,8 +1420,9 @@ function reorderMobileLayout() {
             if (watchlist && leftContent && watchlist.parentNode !== leftContent) leftContent.insertBefore(watchlist, leftContent.firstChild);
             if (chart && centerContent) centerContent.insertBefore(chart, centerContent.firstChild);
             if (trade && leftContent) leftContent.appendChild(trade);
-            if (portfolioChartContainer && rightContent) rightContent.insertBefore(portfolioChartContainer, rightContent.firstChild);
-            if (ai && rightContent) rightContent.insertBefore(ai, portfolioChartContainer?.nextSibling || rightContent.firstChild);
+            if (portfolioLineChart && rightContent && portfolioLineChart.parentNode !== rightContent) rightContent.insertBefore(portfolioLineChart, rightContent.firstChild);
+            if (portfolioPieChart && rightContent && portfolioPieChart.parentNode !== rightContent) rightContent.insertBefore(portfolioPieChart, portfolioLineChart?.nextSibling || rightContent.firstChild);
+            if (ai && rightContent) rightContent.insertBefore(ai, portfolioPieChart?.nextSibling || rightContent.firstChild);
             if (news && rightContent) rightContent.appendChild(news);
             
             mobileContainer.remove();
@@ -1133,14 +1443,14 @@ window.addEventListener('resize', () => {
 setTimeout(reorderMobileLayout, 500);
 
 // ============================================================
-// LEADERBOARD FUNCTIONS
+// LEADERBOARD FUNCTIONS (with improved styling)
 // ============================================================
 async function showLeaderboard() {
     const modal = document.getElementById('leaderboard-modal');
     const listContainer = document.getElementById('leaderboard-list');
     if (!modal || !listContainer) return;
 
-    listContainer.innerHTML = '<div class="text-center py-4">Loading leaderboard...</div>';
+    listContainer.innerHTML = '<div class="text-center py-4 text-gray-400">Loading leaderboard...</div>';
     modal.classList.remove('hidden');
 
     try {
@@ -1151,22 +1461,31 @@ async function showLeaderboard() {
         if (!res.ok) throw new Error(data.error);
 
         if (!data.leaderboard.length) {
-            listContainer.innerHTML = '<div class="text-center py-4">No other users yet.</div>';
+            listContainer.innerHTML = '<div class="text-center py-4 text-gray-400">No other users yet.</div>';
             return;
         }
 
-        let html = '<table class="w-full text-xs"><thead><tr class="border-b border-[#282828]"><th class="text-left py-1">Rank</th><th class="text-left py-1">User</th><th class="text-right py-1">Portfolio Value</th><th class="text-right py-1">24h Change</th><tr></thead><tbody>';
+        // Build a properly styled table with explicit spacing
+        let html = '<div class="overflow-x-auto">';
+        html += '<table class="w-full text-sm border-collapse">';
+        html += '<thead><tr class="border-b border-gray-600">';
+        html += '<th class="text-left py-2 px-3 text-bbAmber">#</th>';
+        html += '<th class="text-left py-2 px-3 text-bbAmber">User</th>';
+        html += '<th class="text-right py-2 px-3 text-bbAmber">Portfolio Value</th>';
+        html += '<th class="text-right py-2 px-3 text-bbAmber">24h Change</th>';
+        html += '</tr></thead><tbody>';
+        
         data.leaderboard.forEach((user, idx) => {
             const changeClass = user.dayChange >= 0 ? 'text-green-500' : 'text-red-500';
             const changeSign = user.dayChange >= 0 ? '+' : '';
-            html += `<tr class="border-b border-[#282828]/40">
-                        <td class="py-1">${idx + 1}</td>
-                        <td class="py-1">${escapeHtml(user.username)}</td>
-                        <td class="py-1 text-right font-mono">$${user.totalValue.toFixed(2)}</td>
-                        <td class="py-1 text-right font-mono ${changeClass}">${changeSign}$${user.dayChange.toFixed(2)} (${changeSign}${user.dayChangePct.toFixed(2)}%)</td>
-                      </tr>`;
+            html += `<tr class="border-b border-gray-700 hover:bg-gray-800/30">
+                <td class="py-2 px-3 align-middle">${idx + 1}</td>
+                <td class="py-2 px-3 align-middle font-medium">${escapeHtml(user.username)}</td>
+                <td class="py-2 px-3 text-right font-mono align-middle">$${user.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td class="py-2 px-3 text-right font-mono ${changeClass} align-middle">${changeSign}$${user.dayChange.toFixed(2)} (${changeSign}${user.dayChangePct.toFixed(2)}%)</td>
+            </tr>`;
         });
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         listContainer.innerHTML = html;
     } catch (err) {
         listContainer.innerHTML = '<div class="text-red-500 text-center py-4">Failed to load leaderboard.</div>';
@@ -1175,4 +1494,144 @@ async function showLeaderboard() {
 
 function closeLeaderboardModal() {
     document.getElementById('leaderboard-modal')?.classList.add('hidden');
+}
+
+// ============================================================
+// ORDER BOOK SIMULATOR
+// ============================================================
+function renderOrderBook(bids, asks, lastPrice) {
+    const bidsContainer = document.getElementById('bids-container');
+    const asksContainer = document.getElementById('asks-container');
+    const lastPriceSpan = document.getElementById('orderbook-last-price');
+    if (!bidsContainer || !asksContainer) return;
+    
+    if (bids && bids.length) {
+        bidsContainer.innerHTML = bids.map(bid => `
+            <div class="flex justify-between text-[10px]">
+                <span class="text-green-500">${bid.price}</span>
+                <span class="text-gray-400">${bid.size}</span>
+            </div>
+        `).join('');
+    } else {
+        bidsContainer.innerHTML = '<div class="text-gray-500">No bids</div>';
+    }
+    
+    if (asks && asks.length) {
+        asksContainer.innerHTML = asks.map(ask => `
+            <div class="flex justify-between text-[10px]">
+                <span class="text-red-500">${ask.price}</span>
+                <span class="text-gray-400">${ask.size}</span>
+            </div>
+        `).join('');
+    } else {
+        asksContainer.innerHTML = '<div class="text-gray-500">No asks</div>';
+    }
+    
+    if (lastPriceSpan && lastPrice) {
+        lastPriceSpan.innerText = `Last: $${lastPrice.toFixed(2)}`;
+    }
+}
+
+// ============================================================
+// CORRELATION MATRIX HEATMAP
+// ============================================================
+async function getTopHoldingsSymbols(limit = 5) {
+    const holdings = Object.entries(portfolio.holdings)
+        .map(([sym, h]) => ({ sym, value: h.qty * (priceCache[sym]?.price || 0) }))
+        .sort((a,b) => b.value - a.value)
+        .slice(0, limit)
+        .map(item => item.sym);
+    // Always include S&P 500 as benchmark
+    if (!holdings.includes('^GSPC')) holdings.push('^GSPC');
+    return holdings;
+}
+
+async function fetchHistoricalCloses(symbol, days = 30) {
+    const candles = await loadHistorical(symbol, days);
+    if (!candles || !candles.length) return [];
+    return candles.map(c => c.close);
+}
+
+function pearsonCorrelation(x, y) {
+    const n = x.length;
+    if (n !== y.length || n === 0) return 0;
+    const sumX = x.reduce((a,b) => a + b, 0);
+    const sumY = y.reduce((a,b) => a + b, 0);
+    const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
+    const sumX2 = x.reduce((sum, xi) => sum + xi * xi, 0);
+    const sumY2 = y.reduce((sum, yi) => sum + yi * yi, 0);
+    const numerator = n * sumXY - sumX * sumY;
+    const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+    return denominator === 0 ? 0 : numerator / denominator;
+}
+
+async function updateCorrelationMatrix() {
+    const container = document.getElementById('correlation-content');
+    if (!container) return;
+    container.innerHTML = '<div class="text-center text-[10px] text-gray-400 py-2">Loading correlation data...</div>';
+    
+    try {
+        const symbols = await getTopHoldingsSymbols(5);
+        // Fetch 30-day closes for each symbol
+        const closesMap = new Map();
+        for (const sym of symbols) {
+            const closes = await fetchHistoricalCloses(sym, 30);
+            if (closes.length < 10) {
+                container.innerHTML = `<div class="text-red-500 text-[10px]">Insufficient data for ${sym}</div>`;
+                return;
+            }
+            closesMap.set(sym, closes);
+        }
+        
+        // Build matrix
+        const n = symbols.length;
+        const matrix = Array(n).fill().map(() => Array(n).fill(0));
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                const corr = pearsonCorrelation(closesMap.get(symbols[i]), closesMap.get(symbols[j]));
+                matrix[i][j] = corr;
+            }
+        }
+        
+        // Render heatmap as a table
+        let html = '<div class="overflow-x-auto"><table class="w-full text-[10px] border-collapse">';
+        // Header row
+        html += '<thead><tr><th class="p-1"></th>';
+        for (let j = 0; j < n; j++) {
+            html += `<th class="p-1 font-bold text-bbAmber">${symbols[j]}</th>`;
+        }
+        html += '</tr></thead><tbody>';
+        for (let i = 0; i < n; i++) {
+            html += `<tr><td class="p-1 font-bold text-bbAmber">${symbols[i]}</td>`;
+            for (let j = 0; j < n; j++) {
+                const corr = matrix[i][j];
+                const color = getCorrelationColor(corr);
+                html += `<td class="p-1 text-center" style="background-color: ${color}; color: ${Math.abs(corr) > 0.5 ? 'white' : 'black'}">${corr.toFixed(2)}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    } catch (err) {
+        console.error('Correlation error:', err);
+        container.innerHTML = '<div class="text-red-500 text-[10px]">Failed to compute correlations</div>';
+    }
+}
+
+function getCorrelationColor(r) {
+    // r from -1 (red) to +1 (green)
+    const t = (r + 1) / 2; // 0..1
+    const red = Math.floor(255 * (1 - t));
+    const green = Math.floor(255 * t);
+    return `rgb(${red}, ${green}, 100)`;
+}
+
+// Collapse functions
+function toggleOrderBook() {
+    const content = document.getElementById('orderbook-content');
+    if (content) content.classList.toggle('hidden');
+}
+function toggleCorrelation() {
+    const content = document.getElementById('correlation-content');
+    if (content) content.classList.toggle('hidden');
 }
