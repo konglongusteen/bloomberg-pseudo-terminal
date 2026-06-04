@@ -1,4 +1,4 @@
-* { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+* { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; } 
 .font-mono, pre, code, .mono, [class*="font-mono"], .indicator-value, #terminal-cli, #stock-price, #stock-change, #stock-change-pct, .watchlist-item, .news-meta, .refresh-btn {
     font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace !important;
 }
@@ -90,14 +90,14 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
     overflow-y: auto;
 }
 
-/* LEFT PANEL: force watchlist to have enough height */
+/* LEFT PANEL */
 #left-pane .pane-content {
     overflow-y: auto;
     gap: 0.75rem;
 }
 #left-pane .watchlist-module {
     flex: 1 1 auto;
-    min-height: 380px;   /* increased to show 6-8 tickers */
+    min-height: 380px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -112,14 +112,14 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
     flex-shrink: 0;
 }
 
-/* RIGHT PANEL: allow scrolling if needed */
+/* RIGHT PANEL */
 #right-pane .pane-content {
     overflow-y: auto;
     gap: 0.75rem;
 }
 
 /* =============================================
-   MOBILE PORTRAIT MODE – ensure all modules scroll individually
+   MOBILE PORTRAIT MODE
    ============================================= */
 @media (max-width: 768px) and (orientation: portrait) {
     .h-screen { height: auto !important; min-height: 100vh !important; overflow-y: visible !important; }
@@ -135,22 +135,14 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
         overflow-y: visible !important; 
         height: auto !important; 
     }
-    /* Reorder modules */
-    .watchlist-module { order: 1; }
-    .chart-module { order: 2; }
-    .trade-module { order: 3; }
-    .strategy-module { order: 4; }
-    .ai-module { order: 5; }
-    .news-module { order: 6; }
-    .movers-module { display: none !important; }
-    .correlation-module { order: 7; }
-    #portfolio-history-container { order: 8; }
-    #portfolio-composition-container { order: 9; }
-    
-    /* Watchlist specific: ensure enough height in portrait */
-    .watchlist-module {
-        min-height: 400px !important;
+    .watchlist-module, .chart-module, .trade-module, .strategy-module,
+    .correlation-module, #portfolio-history-container, #portfolio-composition-container,
+    .ai-module, .news-module, .movers-module {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
     }
+    .watchlist-module { min-height: 400px !important; }
     #watchlist-container { 
         max-height: 42vh !important; 
         min-height: 280px !important;
@@ -160,24 +152,18 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
     }
     .watchlist-module table { width: 100%; }
     .watchlist-module td, .watchlist-module th { padding: 8px 4px !important; }
-    
     .chart-module { min-height: 460px !important; height: auto !important; }
     #chart-parent-container { min-height: 380px !important; height: auto !important; }
     #chart-container { min-height: 350px !important; height: auto !important; }
-    
     .ai-module { display: flex !important; flex-direction: column !important; height: auto !important; min-height: 380px !important; }
     #copilot-chat { flex: 1 1 auto !important; max-height: 240px !important; min-height: 160px !important; overflow-y: auto !important; margin-bottom: 12px; }
-    
     .news-module { max-height: none !important; height: auto !important; }
     #news-container { max-height: 55vh !important; overflow-y: auto !important; }
-    
     .trade-module { height: auto !important; }
     .strategy-module { height: auto !important; }
-    
-    /* Portfolio charts */
+    .correlation-module { height: auto !important; margin-bottom: 1rem; }
     #portfolio-chart { min-height: 150px !important; height: auto !important; width: 100% !important; }
     .bg-\[#050505\] .flex.flex-col.min-h-\[200px\] { min-height: 180px !important; }
-    
     footer { 
         position: fixed !important; 
         bottom: 0 !important; 
@@ -195,7 +181,6 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
         box-shadow: 0 -4px 12px rgba(0,0,0,0.8); 
     }
     footer .flex { display: flex; flex-wrap: nowrap; gap: 6px; }
-    
     button, .watchlist-item, .cursor-pointer { min-height: 40px; }
     .indicator-panel { gap: 8px; padding: 10px; margin-top: 12px; }
     .flex-wrap button { padding: 4px 8px; font-size: 11px; }
@@ -228,54 +213,273 @@ body, .terminal-main, #terminal-workspace { overflow-x: hidden; }
 .hidden { display: none !important; }
 .error-message { color: #ff3333; font-size: 10px; margin-top: 5px; text-align: center; }
 
-/* Leaderboard table spacing */
-#leaderboard-list table { width: 100%; border-collapse: separate; border-spacing: 0; }
-#leaderboard-list th, #leaderboard-list td { padding: 10px 12px; text-align: left; }
-#leaderboard-list td:last-child, #leaderboard-list th:last-child { text-align: right; }
-#leaderboard-list tr { border-bottom: 1px solid #282828; }
-body.light-theme #leaderboard-list tr { border-bottom-color: #cccccc; }
+/* ========== LEADERBOARD TABLE SPACING ========== */
+#leaderboard-list table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+#leaderboard-list th,
+#leaderboard-list td {
+    padding: 10px 8px;
+    text-align: left;
+}
+#leaderboard-list td:last-child,
+#leaderboard-list th:last-child {
+    text-align: right;
+}
+#leaderboard-list tr {
+    border-bottom: 1px solid #333;
+}
 
-/* LIGHT MODE (unchanged) */
-body.light-theme, body.light-theme html { background-color: #ffffff !important; }
-body.light-theme * { background-color: #ffffff !important; }
-body.light-theme canvas { background-color: transparent !important; }
-body.light-theme * { border-color: #cccccc !important; }
-body.light-theme, body.light-theme *, body.light-theme p, body.light-theme span, body.light-theme div, body.light-theme h1, body.light-theme h2, body.light-theme h3, body.light-theme h4, body.light-theme h5, body.light-theme h6, body.light-theme label, body.light-theme td, body.light-theme th, body.light-theme li, body.light-theme .watchlist-symbol-name, body.light-theme .indicator-value, body.light-theme #stock-symbol, body.light-theme #portfolio-cash-lbl, body.light-theme .font-mono, body.light-theme .mover-item span:first-child, body.light-theme #portfolio-positions-list .inline-block strong, body.light-theme .news-title a, body.light-theme .news-meta, body.light-theme .indicator-label, body.light-theme .watchlist-company, body.light-theme .refresh-btn, body.light-theme button:not(.bg-emerald-950):not(.bg-red-950):not(.bg-amber-950), body.light-theme label, body.light-theme .text-[#a0a0a0], body.light-theme .text-gray-500, body.light-theme .login-card .switch, body.light-theme .error-message { color: #000000 !important; }
-body.light-theme .text-green-500, body.light-theme .signal-bullish, body.light-theme .tick-up .text-green-500 { color: #10b981 !important; }
-body.light-theme .text-red-500, body.light-theme .signal-bearish, body.light-theme .tick-down .text-red-500 { color: #ef4444 !important; }
-body.light-theme .signal-neutral, body.light-theme .text-bbAmber, body.light-theme .text-bbCyan { color: #b45309 !important; }
-body.light-theme input, body.light-theme select, body.light-theme button.bg-black, body.light-theme .bg-black input, body.light-theme .bg-black select, body.light-theme #trade-symbol, body.light-theme #trade-qty, body.light-theme #search-input, body.light-theme #filter-type, body.light-theme #filter-value { background-color: #f9fafb !important; color: #000000 !important; border-color: #cccccc !important; }
-body.light-theme #portfolio-positions-list .inline-block { background-color: #ffffff !important; border-color: #cccccc !important; }
-body.light-theme #portfolio-positions-list .inline-block strong { color: #000000 !important; }
-body.light-theme .news-item { background-color: #ffffff !important; border-left-color: #b45309 !important; }
-body.light-theme .news-item:hover { background-color: #f5f5f5 !important; }
-body.light-theme .refresh-btn { color: #b45309 !important; }
-body.light-theme .refresh-btn:hover { background-color: #e5e7eb !important; }
-body.light-theme .resize-handle { background-color: #cccccc !important; }
-body.light-theme .resize-handle:hover, body.light-theme .resize-handle.active { background-color: #b45309 !important; }
+/* =============================================
+   LIGHT MODE - COMPLETE FIX FOR ALL ELEMENTS
+   ============================================= */
+body.light-theme {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+}
+
+body.light-theme * {
+    background-color: #ffffff !important;
+    border-color: #cccccc !important;
+    color: #000000 !important;
+}
+
+/* EXCEPTIONS: elements that must keep specific colors */
+/* Chart canvas and lightweight charts container - transparent background */
+body.light-theme canvas,
+body.light-theme #chart-container,
+body.light-theme .tv-lightweight-charts * {
+    background-color: transparent !important;
+}
+
+/* Correlation matrix cells: keep inline background colors */
+body.light-theme .correlation-module table td {
+    background-color: transparent !important;
+}
+body.light-theme .correlation-module table td * {
+    background-color: transparent !important;
+}
+
+/* Buttons with special backgrounds (Buy/Sell/Sell All) */
+body.light-theme .bg-emerald-950,
+body.light-theme .bg-red-950,
+body.light-theme .bg-amber-950 {
+    background-color: currentColor !important;
+}
 body.light-theme .bg-emerald-950 { background-color: #064e3b !important; }
 body.light-theme .bg-red-950 { background-color: #7f1d1d !important; }
 body.light-theme .bg-amber-950 { background-color: #78350f !important; }
 body.light-theme .bg-emerald-950:hover { background-color: #047857 !important; }
 body.light-theme .bg-red-950:hover { background-color: #b91c1c !important; }
 body.light-theme .bg-amber-950:hover { background-color: #b45309 !important; }
-body.light-theme .bg-emerald-950 .text-green-500, body.light-theme .bg-red-950 .text-red-500, body.light-theme .bg-amber-950 .text-bbAmber { color: #ffffff !important; }
-body.light-theme #chart-container { background-color: #ffffff !important; }
-body.light-theme select, body.light-theme option, body.light-theme #forecast-model { color: #000000 !important; background-color: #f9fafb !important; }
-body.light-theme .tv-lightweight-charts-tooltip { background-color: #ffffff !important; border-color: #cccccc !important; color: #000000 !important; }
-body.light-theme #terminal-interface, body.light-theme #terminal-interface * { color: #000000 !important; }
-body.light-theme .text-green-500, body.light-theme .signal-bullish, body.light-theme .tick-up .text-green-500 { color: #10b981 !important; }
-body.light-theme .text-red-500, body.light-theme .signal-bearish, body.light-theme .tick-down .text-red-500 { color: #ef4444 !important; }
-body.light-theme .signal-neutral, body.light-theme .text-bbAmber, body.light-theme .text-bbCyan { color: #b45309 !important; }
-body.light-theme .bg-emerald-950, body.light-theme .bg-red-950, body.light-theme .bg-amber-950 { color: #ffffff !important; }
-body.light-theme #copilot-chat div, body.light-theme .bg-black\/50, body.light-theme .bg-neutral-900\/50 { background-color: #f0f0f0 !important; border-left-color: #b45309 !important; }
-body.light-theme #copilot-chat .text-bbCyan, body.light-theme #copilot-chat strong { color: #b45309 !important; }
-body.light-theme #copilot-chat .text-bbAmber { color: #b45309 !important; }
-body.light-theme #copilot-chat div { background-color: #ffffff !important; border-color: #cccccc !important; color: #000000 !important; }
-body.light-theme #copilot-chat .bg-black\/50 { background-color: #f0f0f0 !important; }
-body.light-theme .ai-module, body.light-theme .bg-cyan-950 { background-color: #ffffff !important; color: #000000 !important; }
-body.light-theme #copilot-input { background-color: #f9fafb !important; color: #000000 !important; border-color: #cccccc !important; }
-body.light-theme #copilot-send-btn { background-color: #e5e7eb !important; color: #000000 !important; border-color: #cccccc !important; }
-body.light-theme #copilot-send-btn:hover { background-color: #d1d5db !important; }
-body.light-theme #leaderboard-list tr { border-bottom-color: #cccccc; }
-body.light-theme #leaderboard-list tbody tr:hover { background-color: rgba(0,0,0,0.05); }
+body.light-theme .bg-emerald-950 .text-green-500,
+body.light-theme .bg-red-950 .text-red-500,
+body.light-theme .bg-amber-950 .text-bbAmber {
+    color: #ffffff !important;
+}
+
+/* GREEN color for positive numbers */
+body.light-theme .text-green-500,
+body.light-theme .signal-bullish,
+body.light-theme .tick-up .text-green-500,
+body.light-theme .mover-item .text-green-500,
+body.light-theme .history-table .text-green-500,
+body.light-theme #stock-price.text-green-500,
+body.light-theme #stock-change.text-green-500,
+body.light-theme .watchlist-item .text-green-500,
+body.light-theme .leaderboard-change-positive {
+    color: #10b981 !important;
+    background-color: transparent !important;
+}
+
+/* RED color for negative numbers */
+body.light-theme .text-red-500,
+body.light-theme .signal-bearish,
+body.light-theme .tick-down .text-red-500,
+body.light-theme .mover-item .text-red-500,
+body.light-theme .history-table .text-red-500,
+body.light-theme #stock-price.text-red-500,
+body.light-theme #stock-change.text-red-500,
+body.light-theme .watchlist-item .text-red-500,
+body.light-theme .leaderboard-change-negative {
+    color: #ef4444 !important;
+    background-color: transparent !important;
+}
+
+/* Amber/Cyan for special highlights */
+body.light-theme .signal-neutral,
+body.light-theme .text-bbAmber,
+body.light-theme .text-bbCyan {
+    color: #b45309 !important;
+    background-color: transparent !important;
+}
+
+/* Inputs, selects, form elements */
+body.light-theme input,
+body.light-theme select,
+body.light-theme textarea,
+body.light-theme .bg-black input,
+body.light-theme .bg-black select,
+body.light-theme #trade-symbol,
+body.light-theme #trade-qty,
+body.light-theme #search-input,
+body.light-theme #filter-type,
+body.light-theme #filter-value,
+body.light-theme #forecast-model,
+body.light-theme #strategy-symbol,
+body.light-theme #strategy-indicator,
+body.light-theme #strategy-qty {
+    background-color: #f9fafb !important;
+    color: #000000 !important;
+    border-color: #cccccc !important;
+}
+
+/* Watchlist specific - force black text for symbols and company names */
+body.light-theme .watchlist-symbol-name,
+body.light-theme .watchlist-company,
+body.light-theme .watchlist-module td,
+body.light-theme .watchlist-module th,
+body.light-theme .watchlist-module .font-bold,
+body.light-theme .watchlist-module .text-neutral-400 {
+    color: #000000 !important;
+    background-color: transparent !important;
+}
+
+/* Leaderboard specific - black text, green/red for changes */
+body.light-theme #leaderboard-list,
+body.light-theme #leaderboard-list * {
+    color: #000000 !important;
+    background-color: transparent !important;
+}
+body.light-theme #leaderboard-list .text-green-500 {
+    color: #10b981 !important;
+}
+body.light-theme #leaderboard-list .text-red-500 {
+    color: #ef4444 !important;
+}
+body.light-theme #leaderboard-list tr {
+    border-bottom-color: #cccccc !important;
+}
+body.light-theme #leaderboard-list tr:hover {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* News specific - black text */
+body.light-theme .news-item,
+body.light-theme .news-title a,
+body.light-theme .news-meta {
+    color: #000000 !important;
+    background-color: #f9fafb !important;
+}
+body.light-theme .news-item:hover {
+    background-color: #e5e7eb !important;
+}
+body.light-theme .news-title a:hover {
+    color: #b45309 !important;
+}
+
+/* Portfolio positions tags */
+body.light-theme #portfolio-positions-list .inline-block {
+    background-color: #f0f0f0 !important;
+    border-color: #cccccc !important;
+    color: #000000 !important;
+}
+body.light-theme #portfolio-positions-list .inline-block strong {
+    color: #000000 !important;
+}
+
+/* Refresh button */
+body.light-theme .refresh-btn {
+    color: #b45309 !important;
+    background-color: transparent !important;
+}
+body.light-theme .refresh-btn:hover {
+    background-color: #e5e7eb !important;
+}
+
+/* Resize handles */
+body.light-theme .resize-handle {
+    background-color: #cccccc !important;
+}
+body.light-theme .resize-handle:hover,
+body.light-theme .resize-handle.active {
+    background-color: #b45309 !important;
+}
+
+/* AI Copilot */
+body.light-theme #copilot-chat div,
+body.light-theme .bg-black\/50,
+body.light-theme .bg-neutral-900\/50 {
+    background-color: #f0f0f0 !important;
+    border-left-color: #b45309 !important;
+    color: #000000 !important;
+}
+body.light-theme #copilot-chat .text-bbCyan,
+body.light-theme #copilot-chat strong {
+    color: #b45309 !important;
+}
+body.light-theme #copilot-chat .text-bbAmber {
+    color: #b45309 !important;
+}
+body.light-theme .ai-module,
+body.light-theme .bg-cyan-950 {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+}
+body.light-theme #copilot-input {
+    background-color: #f9fafb !important;
+    color: #000000 !important;
+    border-color: #cccccc !important;
+}
+body.light-theme #copilot-send-btn {
+    background-color: #e5e7eb !important;
+    color: #000000 !important;
+    border-color: #cccccc !important;
+}
+body.light-theme #copilot-send-btn:hover {
+    background-color: #d1d5db !important;
+}
+
+/* Indicator panel */
+body.light-theme .indicator-panel {
+    background-color: #f9fafb !important;
+    border-color: #cccccc !important;
+}
+body.light-theme .indicator-label {
+    color: #666666 !important;
+}
+body.light-theme .indicator-value {
+    color: #000000 !important;
+}
+
+/* Chart parent container */
+body.light-theme #chart-parent-container {
+    background-color: #ffffff !important;
+}
+
+/* Top movers */
+body.light-theme .movers-col,
+body.light-theme .mover-item {
+    color: #000000 !important;
+}
+body.light-theme .mover-item .text-green-500 {
+    color: #10b981 !important;
+}
+body.light-theme .mover-item .text-red-500 {
+    color: #ef4444 !important;
+}
+
+/* Trade history modal */
+body.light-theme .history-table th,
+body.light-theme .history-table td {
+    color: #000000 !important;
+    border-bottom-color: #cccccc !important;
+}
+body.light-theme .history-table .text-green-500 {
+    color: #10b981 !important;
+}
+body.light-theme .history-table .text-red-500 {
+    color: #ef4444 !important;
+}

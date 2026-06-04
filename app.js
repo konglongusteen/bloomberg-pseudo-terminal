@@ -32,6 +32,16 @@ const companyNamesMap = {
     'ASHR': 'CSI 300 ETF'
 };
 
+// Fallback for toggleStrategyBuilder (in case backtester.js hasn't loaded yet)
+window.toggleStrategyBuilder = window.toggleStrategyBuilder || function() {
+    const content = document.getElementById('strategy-content');
+    if (content) content.classList.toggle('hidden');
+};
+window.toggleCorrelation = window.toggleCorrelation || function() {
+    const content = document.getElementById('correlation-content');
+    if (content) content.classList.toggle('hidden');
+};
+
 function setAuthMode(login) { isLoginMode = login; if (login) { loginConfirm.style.display = 'none'; loginSubmit.innerText = 'Login'; loginSwitch.innerText = "Don't have an account? Register"; } else { loginConfirm.style.display = 'block'; loginSubmit.innerText = 'Register'; loginSwitch.innerText = "Already have an account? Login"; } loginError.innerText = ''; }
 loginSwitch.onclick = () => setAuthMode(!isLoginMode);
 loginSubmit.onclick = async () => {
@@ -72,7 +82,6 @@ async function loadPortfolioFromBackend() {
                 portfolio = data.portfolio;
                 localStorage.setItem('bb_portfolio', JSON.stringify(portfolio));
                 updatePortfolioDisplay();
-                // Force composition update (ignore state check) and retry
                 updatePortfolioComposition(0, true);
                 setTimeout(() => updatePortfolioComposition(0, true), 3000);
                 setTimeout(() => updatePortfolioComposition(0, true), 6000);
@@ -82,7 +91,7 @@ async function loadPortfolioFromBackend() {
 }
 
 // ============================================================
-// 2. TRADE HISTORY SYNC (MongoDB)
+// 2. TRADE HISTORY SYNC (MongoDB) with Audit Trail (Phase 4)
 // ============================================================
 let tradeHistory = [];
 async function loadTradeHistoryFromBackend() {
@@ -109,6 +118,46 @@ function addTradeRecord(symbol, action, qty, price, pnl = null) {
     localStorage.setItem('trade_history', JSON.stringify(tradeHistory));
     syncTradeHistoryToBackend();
 }
+
+// Modified showTradeHistoryModal with Verify buttons (Phase 4)
+async function showTradeHistoryModal() {
+    const container = document.getElementById('trade-history-list');
+    if (!tradeHistory.length) {
+        container.innerHTML = '<div class="text-gray-500 text-center">No trades recorded.</div>';
+    } else {
+        let html = '<table class="history-table"><thead><tr><th>Date</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>P&L</th><th>Verification</th></tr></thead><tbody>';
+        for (const t of tradeHistory) {
+            const pnlClass = t.pnl && t.pnl > 0 ? 'text-green-500' : (t.pnl && t.pnl < 0 ? 'text-red-500' : 'text-gray-400');
+            const verifyBtn = `<button class="text-[9px] bg-bbAmber/20 text-bbAmber px-1 rounded verify-trade" data-id="${t.id}">Verify</button>`;
+            html += `<tr>
+                <td>${new Date(t.timestamp).toLocaleString()}</td>
+                <td>${t.symbol}</td>
+                <td class="${t.action === 'BUY' ? 'text-green-500' : 'text-red-500'}">${t.action}</td>
+                <td>${t.qty}</td>
+                <td>$${t.price.toFixed(2)}</td>
+                <td class="${pnlClass}">${t.pnl ? `$${t.pnl.toFixed(2)}` : '—'}</td>
+                <td>${verifyBtn}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        // Attach event listeners to verify buttons
+        document.querySelectorAll('.verify-trade').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const id = btn.getAttribute('data-id');
+                try {
+                    const res = await fetch(`/api/trade-history/verify/${id}`, { headers: { 'Authorization': `Bearer ${authToken}` } });
+                    const data = await res.json();
+                    alert(data.valid ? '✓ Trade signature is valid (tamper-proof)' : '✗ Trade signature INVALID! Data may have been altered.');
+                } catch (err) {
+                    alert('Verification failed: ' + err.message);
+                }
+            });
+        });
+    }
+    document.getElementById('trade-history-modal').classList.remove('hidden');
+}
+function closeTradeHistoryModal() { document.getElementById('trade-history-modal').classList.add('hidden'); }
 
 // ============================================================
 // 3. PORTFOLIO VALUE HISTORY (Chart) with interval selector
@@ -160,7 +209,6 @@ async function loadPortfolioHistoryFromBackend() {
             const data = await res.json();
             portfolioHistory = data.history || [];
             if (portfolioHistory.length === 0) {
-                // Create a fallback entry from current portfolio value
                 let totalValue = portfolio.cash;
                 for (const [sym, h] of Object.entries(portfolio.holdings)) {
                     const price = priceCache[sym]?.price;
@@ -179,84 +227,87 @@ function getPortfolioHistoryFiltered() {
     const now = new Date();
     const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     let startDate = new Date(todayUTC);
-    
     switch (portfolioHistoryRange) {
-        case '1W':
-            startDate.setUTCDate(todayUTC.getUTCDate() - 7);
-            break;
-        case '1M':
-            startDate.setUTCMonth(todayUTC.getUTCMonth() - 1);
-            break;
-        case '3M':
-            startDate.setUTCMonth(todayUTC.getUTCMonth() - 3);
-            break;
-        default:
-            return portfolioHistory;
+        case '1W': startDate.setUTCDate(todayUTC.getUTCDate() - 7); break;
+        case '1M': startDate.setUTCMonth(todayUTC.getUTCMonth() - 1); break;
+        case '3M': startDate.setUTCMonth(todayUTC.getUTCMonth() - 3); break;
+        default: return portfolioHistory;
     }
     const startStr = startDate.toISOString().split('T')[0];
     const filtered = portfolioHistory.filter(h => h.timestamp >= startStr);
-    // If filtering removed everything but we have data, show the most recent day
-    if (filtered.length === 0 && portfolioHistory.length > 0) {
-        return [portfolioHistory[portfolioHistory.length - 1]];
-    }
+    if (filtered.length === 0 && portfolioHistory.length > 0) return [portfolioHistory[portfolioHistory.length - 1]];
     return filtered;
 }
 
+// FIXED: updatePortfolioChart now updates existing chart instead of destroying/recreating
 function updatePortfolioChart() {
     const canvas = document.getElementById('portfolio-chart');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
-        setTimeout(() => updatePortfolioChart(), 200);
+        setTimeout(() => updatePortfolioChart(), 100);
         return;
     }
-    if (portfolioChart) portfolioChart.destroy();
-    
-    const filteredHistory = getPortfolioHistoryFiltered();  // renamed to avoid conflict
-    const labels = filteredHistory.map(h => h.timestamp);
-    const values = filteredHistory.map(h => h.totalValue);
+    const filtered = getPortfolioHistoryFiltered();
+    const labels = filtered.map(h => h.timestamp);
+    const values = filtered.map(h => h.totalValue);
     const isLightTheme = document.body.classList.contains('light-theme');
     const textColor = isLightTheme ? '#000000' : '#e2e2e2';
     const gridColor = isLightTheme ? '#dddddd' : '#282828';
-    
-    portfolioChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Portfolio Value ($)',
-                data: values,
-                borderColor: '#dfb257',
-                backgroundColor: 'rgba(223,178,87,0.1)',
-                fill: true,
-                tension: 0.1,
-                pointRadius: 3,
-                pointHoverRadius: 5,
-                pointBackgroundColor: '#dfb257',
-                pointBorderColor: isLightTheme ? '#000000' : '#ffffff',
-                pointBorderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { labels: { color: textColor, font: { size: 10 } } },
-                tooltip: { enabled: true, mode: 'index', intersect: false }
+
+    if (portfolioChart) {
+        // Update existing chart
+        portfolioChart.data.labels = labels;
+        portfolioChart.data.datasets[0].data = values;
+        portfolioChart.options.plugins.legend.labels.color = textColor;
+        portfolioChart.options.scales.y.ticks.color = textColor;
+        portfolioChart.options.scales.x.ticks.color = textColor;
+        portfolioChart.options.scales.y.grid.color = gridColor;
+        portfolioChart.options.scales.x.grid.color = gridColor;
+        portfolioChart.update();
+        portfolioChart.resize();
+    } else {
+        // Create new chart
+        portfolioChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Portfolio Value ($)',
+                    data: values,
+                    borderColor: '#dfb257',
+                    backgroundColor: 'rgba(223,178,87,0.1)',
+                    fill: true,
+                    tension: 0.1,
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    pointBackgroundColor: '#dfb257',
+                    pointBorderColor: isLightTheme ? '#000000' : '#ffffff',
+                    pointBorderWidth: 1
+                }]
             },
-            scales: {
-                y: { ticks: { color: textColor }, grid: { color: gridColor } },
-                x: { ticks: { color: textColor, maxRotation: 45, autoSkip: true }, grid: { color: gridColor } }
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: { labels: { color: textColor, font: { size: 10 } } },
+                    tooltip: { enabled: true, mode: 'index', intersect: false }
+                },
+                scales: {
+                    y: { ticks: { color: textColor }, grid: { color: gridColor } },
+                    x: { ticks: { color: textColor, maxRotation: 45, autoSkip: true }, grid: { color: gridColor } }
+                }
             }
-        }
-    });
+        });
+    }
 }
 
 function setPortfolioHistoryRange(range) {
     portfolioHistoryRange = range;
     updatePortfolioChart();
 }
+
 // ============================================================
 // 4. QUOTE CACHING & TIMESTAMP
 // ============================================================
@@ -305,21 +356,17 @@ function connectWebSocket() {
         const data = JSON.parse(e.data);
         if (data.type === 'trade') {
             pendingWsUpdates[data.symbol] = data.price;
-            // Render order book for current symbol if data contains bids/asks
-            if (data.bids && data.asks && data.symbol === currentSymbol) {
-                renderOrderBook(data.bids, data.asks, data.price);
-            }
             if (wsRafId === null) wsRafId = requestAnimationFrame(applyWsUpdates);
         }
     };
     ws.onerror = (err) => console.warn('WebSocket error', err);
     ws.onclose = () => {
         const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
-        console.log(`WebSocket closed. Reconnecting in ${delay}ms...`);
         setTimeout(connectWebSocket, delay);
         reconnectAttempts++;
     };
 }
+
 // ============================================================
 // 6. HISTORICAL DATA CACHE
 // ============================================================
@@ -333,21 +380,18 @@ function setCachedCandles(symbol, days, candles) { localStorage.setItem(`candles
 function haptic() { if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(100); }
 
 // ============================================================
-// 8. PORTFOLIO COMPOSITION PIE CHART (optimised with retry)
+// 8. PORTFOLIO COMPOSITION PIE CHART
 // ============================================================
 let compositionChart = null;
 let lastPortfolioState = null;
-
 function updatePortfolioComposition(retry = 0, force = false) {
     const currentState = JSON.stringify({ cash: portfolio.cash, holdings: portfolio.holdings });
     if (!force && lastPortfolioState === currentState && compositionChart !== null) return;
     if (!force) lastPortfolioState = currentState;
-    
     const canvas = document.getElementById('portfolio-composition-chart');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
     const totalCash = portfolio.cash;
     let totalHoldingsValue = 0;
     const holdingsData = [];
@@ -367,12 +411,10 @@ function updatePortfolioComposition(retry = 0, force = false) {
         }
     }
     const total = totalCash + totalHoldingsValue;
-    
     if (Object.keys(portfolio.holdings).length > 0 && total === 0 && missingPrices && retry < 15) {
         setTimeout(() => updatePortfolioComposition(retry + 1, force), 1000);
         return;
     }
-    
     if (total === 0) {
         if (compositionChart) compositionChart.destroy();
         compositionChart = null;
@@ -448,20 +490,13 @@ let currentSymbol = 'AAPL', currentInterval = '1M'; let chart = null, candleSeri
     'V', 'PG', 'UNH', 'HD', 'DIS', 'MA', 'BAC', 'NFLX', 'ADBE', 'CRM', 'KO', 'PEP',
     'TMO', 'COST', 'ABT', 'DHR', 'WMT', 'NKE', 'CVX', 'MRK', 'ABBV', 'LLY', 'AVGO',
     'TXN', 'QCOM', 'AMGN', 'SBUX', 'LOW', 'UPS', 'GE', 'IBM', 'CAT', 'GS', 'MS', 'C',
-    'PLD', 'SPGI', 'BLK', 'T', 'VZ',
-    '^GSPC', '^IXIC', '^N225', 'ASHR'
+    'PLD', 'SPGI', 'BLK', 'T', 'VZ', '^GSPC', '^IXIC', '^N225', 'ASHR'
 ]; let portfolio = { cash: 100000.00, holdings: {} }; let currentCandles = [];
 
-const assetTypeMap = {
-    '^GSPC': 'index', '^IXIC': 'index', '^N225': 'index', 'ASHR': 'index'
-};
-function getAssetType(sym) {
-    return assetTypeMap[sym] || 'stock';
-}
+const assetTypeMap = { '^GSPC': 'index', '^IXIC': 'index', '^N225': 'index', 'ASHR': 'index' };
+function getAssetType(sym) { return assetTypeMap[sym] || 'stock'; }
 
-// ============================================================
-// 10b. TOTAL PRICE PREVIEW
-// ============================================================
+// Total price preview
 function updateTotalPreview() {
     const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
     const qty = parseFloat(document.getElementById('trade-qty').value);
@@ -476,16 +511,10 @@ function updateTotalPreview() {
     totalSpan.innerText = `$${total.toFixed(2)}`;
 }
 
-// ============================================================
-// 11. PORTFOLIO DISPLAY & TOP MOVERS
-// ============================================================
+// Portfolio display & top movers
 function updateTopMovers() { const gainers = [], losers = []; for (const sym of watchlistSymbols) { const data = priceCache[sym]; if (data && typeof data.changePct === 'number' && !isNaN(data.changePct)) { if (data.changePct >= 0) gainers.push({ sym, pct: data.changePct }); else losers.push({ sym, pct: data.changePct }); } } gainers.sort((a,b) => b.pct - a.pct); losers.sort((a,b) => a.pct - b.pct); document.getElementById('gainers-list').innerHTML = gainers.slice(0,5).map(g => `<div class="mover-item"><span>${g.sym}</span><span class="text-green-500">+${g.pct.toFixed(2)}%</span></div>`).join('') || 'None'; document.getElementById('losers-list').innerHTML = losers.slice(0,5).map(l => `<div class="mover-item"><span>${l.sym}</span><span class="text-red-500">${l.pct.toFixed(2)}%</span></div>`).join('') || 'None'; }
-function showTradeHistoryModal() { const container = document.getElementById('trade-history-list'); if (!tradeHistory.length) container.innerHTML = '<div class="text-gray-500 text-center">No trades recorded.</div>'; else { let html = '<table class="history-table"><thead><tr><th>Date</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>P&L</th></tr></thead><tbody>'; tradeHistory.forEach(t => { const pnlClass = t.pnl && t.pnl > 0 ? 'text-green-500' : (t.pnl && t.pnl < 0 ? 'text-red-500' : 'text-gray-400'); html += `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.symbol}</td><td class="${t.action === 'BUY' ? 'text-green-500' : 'text-red-500'}">${t.action}</td><td>${t.qty}</td><td>$${t.price.toFixed(2)}</td><td class="${pnlClass}">${t.pnl ? `$${t.pnl.toFixed(2)}` : '—'}</td></tr>`; }); html += '</tbody></table>'; container.innerHTML = html; } document.getElementById('trade-history-modal').classList.remove('hidden'); }
-function closeTradeHistoryModal() { document.getElementById('trade-history-modal').classList.add('hidden'); }
 
-// ============================================================
-// 12. SELL ALL (supports fractional shares)
-// ============================================================
+// Sell all
 function sellAllShares() {
     const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
     const errorDiv = document.getElementById('trade-error-message');
@@ -509,9 +538,7 @@ function sellAllShares() {
     haptic();
 }
 
-// ============================================================
-// 13. BUY / SELL TRADES (support fractional shares)
-// ============================================================
+// Buy / Sell trades (fractional)
 function executeQuickTrade(action) {
     const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
     let qty = parseFloat(document.getElementById('trade-qty').value);
@@ -546,7 +573,6 @@ function executeQuickTrade(action) {
     haptic();
 }
 
-// Helper for AI action buttons (used by dynamically created buttons)
 function executeAIAction(action, symbol, qty) {
     document.getElementById('trade-symbol').value = symbol;
     document.getElementById('trade-qty').value = qty;
@@ -557,9 +583,6 @@ document.getElementById('buy-btn').onclick = () => executeQuickTrade('BUY');
 document.getElementById('sell-btn').onclick = () => executeQuickTrade('SELL');
 document.getElementById('sell-all-btn').onclick = sellAllShares;
 
-// ============================================================
-// 14. UPDATE PORTFOLIO UI (show fractional quantities)
-// ============================================================
 window.updatePortfolioDisplay = function() {
     document.getElementById('portfolio-cash-lbl').innerText = `$${portfolio.cash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
     const list = document.getElementById('portfolio-positions-list');
@@ -579,16 +602,12 @@ window.updatePortfolioDisplay = function() {
     updatePortfolioComposition();
 };
 
-// ============================================================
-// 15. FAVOURITES
-// ============================================================
+// Favourites
 let favourites = JSON.parse(localStorage.getItem('favourites')) || {};
 function toggleFavourite(sym) { favourites[sym] = !favourites[sym]; localStorage.setItem('favourites', JSON.stringify(favourites)); renderWatchlist(); }
 function isFavourite(sym) { return favourites[sym] === true; }
 
-// ============================================================
-// 16. LOAD QUOTE (Yahoo only)
-// ============================================================
+// Load quote (Yahoo)
 async function loadQuote(symbol) {
     const now = Date.now();
     if (quoteCache[symbol] && (now - quoteCache[symbol].timestamp < QUOTE_CACHE_TTL)) {
@@ -631,9 +650,7 @@ async function loadQuote(symbol) {
     }
 }
 
-// ============================================================
-// 17. TECHNICAL INDICATORS
-// ============================================================
+// Technical indicators
 function calculateRSI(prices, period) {
     if (prices.length < period + 1) return null;
     let gains = 0, losses = 0;
@@ -685,7 +702,6 @@ function updateIndicators(candles) {
     const bbSignalEl = document.getElementById('bb-signal');
     const maStatusEl = document.getElementById('ma-status');
     const maPredictionEl = document.getElementById('ma-prediction');
-
     if (!candles || candles.length < 30) {
         if (rsiValueEl) rsiValueEl.innerText = '--';
         if (rsiSignalEl) rsiSignalEl.innerText = '--';
@@ -697,9 +713,7 @@ function updateIndicators(candles) {
         if (maPredictionEl) maPredictionEl.innerText = '--';
         return;
     }
-
     const closes = candles.map(c => c.close);
-    
     let rsi = calculateRSI(closes, 14);
     if (rsi !== null && rsiValueEl && rsiSignalEl) {
         rsiValueEl.innerHTML = rsi.toFixed(1);
@@ -710,13 +724,11 @@ function updateIndicators(candles) {
         rsiSignalEl.innerHTML = signal;
         rsiSignalEl.className = `text-[9px] ${rsi > 70 ? 'signal-bearish' : (rsi < 30 ? 'signal-bullish' : 'signal-neutral')}`;
     }
-    
     const macd = calculateMACD(closes);
     if (macd.macd !== null && macdValueEl && macdSignalEl) {
         macdValueEl.innerHTML = macd.macd.toFixed(2);
         macdSignalEl.innerHTML = macd.macd > 0 ? 'Bullish' : 'Bearish';
     }
-    
     const bb = calculateBollingerBands(closes);
     const lastPrice = closes[closes.length - 1];
     if (bb.upper !== null && bbStatusEl && bbSignalEl) {
@@ -727,7 +739,6 @@ function updateIndicators(candles) {
         bbStatusEl.innerHTML = bbStatus;
         bbSignalEl.innerHTML = `Upper: ${bb.upper.toFixed(2)} / Lower: ${bb.lower.toFixed(2)}`;
     }
-    
     const sma20 = calculateSMA(closes, 20), sma50 = calculateSMA(closes, 50);
     if (sma20 !== null && sma50 !== null && maStatusEl && maPredictionEl) {
         const isBullish = sma20 > sma50;
@@ -738,22 +749,13 @@ function updateIndicators(candles) {
     }
 }
 
-// ============================================================
-// SAFE QUOTE PANEL UPDATE (no market cap/PE)
-// ============================================================
 function updateQuotePanel(data) {
     const priceEl = document.getElementById('stock-price');
     const changeEl = document.getElementById('stock-change');
     const changePctEl = document.getElementById('stock-change-pct');
-    
     if (!priceEl || !changeEl || !changePctEl) return;
-    
     try {
-        const isValid = data && 
-                        typeof data.price === 'number' && !isNaN(data.price) &&
-                        typeof data.change === 'number' && !isNaN(data.change) &&
-                        typeof data.changePct === 'number' && !isNaN(data.changePct);
-        
+        const isValid = data && typeof data.price === 'number' && !isNaN(data.price) && typeof data.change === 'number' && !isNaN(data.change) && typeof data.changePct === 'number' && !isNaN(data.changePct);
         if (!isValid) {
             priceEl.innerText = '---';
             changeEl.innerText = '---';
@@ -764,7 +766,6 @@ function updateQuotePanel(data) {
             updateTotalPreview();
             return;
         }
-        
         priceEl.innerText = data.price.toFixed(2);
         changeEl.innerText = (data.change >= 0 ? '+' : '') + data.change.toFixed(2);
         changePctEl.innerText = (data.changePct >= 0 ? '+' : '') + data.changePct.toFixed(2) + '%';
@@ -785,9 +786,7 @@ function updateQuotePanel(data) {
     }
 }
 
-// ============================================================
-// 18. FORECAST
-// ============================================================
+// Forecast
 function linearRegressionForecast(prices, daysAhead) {
     let n = prices.length;
     if (n < 3) return null;
@@ -858,9 +857,7 @@ async function updateForecastPanel(candles) {
     return null;
 }
 
-// ============================================================
-// 19. CHART INITIALISATION
-// ============================================================
+// Chart initialization
 function initChart() { const container = document.getElementById('chart-container'), parent = document.getElementById('chart-parent-container'); if (!container || !parent) return; container.innerHTML = ''; const width = parent.clientWidth || 600, height = parent.clientHeight - 80 || 400; chart = LightweightCharts.createChart(container, { width, height, layout: { background: { color: '#000000' }, textColor: '#a0a0a0' }, grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } }, crosshair: { mode: LightweightCharts.CrosshairMode.Normal }, rightPriceScale: { borderColor: '#282828' }, timeScale: { borderColor: '#282828', timeVisible: true } }); candleSeries = chart.addCandlestickSeries({ upColor: '#00ff00', downColor: '#ff3333', borderDownColor: '#ff3333', borderUpColor: '#00ff00', wickDownColor: '#ff3333', wickUpColor: '#00ff00' }); volumeSeries = chart.addHistogramSeries({ color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: 'volume', lineWidth: 1, priceLineVisible: false }); chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } }); lineSeries = chart.addLineSeries({ color: '#dfb257', lineWidth: 2, priceLineVisible: false }); if (lineSeries && typeof lineSeries.applyOptions === 'function') lineSeries.applyOptions({ visible: false }); else if (lineSeries && typeof lineSeries.setVisible === 'function') lineSeries.setVisible(false); forecastSeries = chart.addLineSeries({ color: '#ffaa00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, title: 'Forecast' }); if (forecastSeries && typeof forecastSeries.applyOptions === 'function') forecastSeries.applyOptions({ visible: showForecast }); else if (forecastSeries && typeof forecastSeries.setVisible === 'function') forecastSeries.setVisible(showForecast); new ResizeObserver(() => { if (chart) { const newWidth = parent.clientWidth, newHeight = parent.clientHeight - 80; if (newWidth > 0 && newHeight > 0) chart.resize(newWidth, newHeight); } }).observe(parent); }
 function toggleChartType() { isLineMode = document.getElementById('line-mode-toggle').checked; if (candleSeries && lineSeries) { if (typeof candleSeries.applyOptions === 'function') candleSeries.applyOptions({ visible: !isLineMode }); else if (typeof candleSeries.setVisible === 'function') candleSeries.setVisible(!isLineMode); if (typeof lineSeries.applyOptions === 'function') lineSeries.applyOptions({ visible: isLineMode }); else if (typeof lineSeries.setVisible === 'function') lineSeries.setVisible(isLineMode); } }
 async function toggleForecastLine() { showForecast = document.getElementById('forecast-toggle').checked; if (forecastSeries) { if (typeof forecastSeries.applyOptions === 'function') forecastSeries.applyOptions({ visible: showForecast }); else if (typeof forecastSeries.setVisible === 'function') forecastSeries.setVisible(showForecast); } if (showForecast && currentCandles.length) { const forecastValues = await updateForecastPanel(currentCandles); if (forecastValues && currentCandles.length) { const lastCandle = currentCandles[currentCandles.length-1]; const lastDate = new Date(lastCandle.time); const forecastData = []; for (let i = 1; i <= 5; i++) { const futureDate = new Date(lastDate); futureDate.setDate(lastDate.getDate() + i); forecastData.push({ time: futureDate.toISOString().split('T')[0], value: forecastValues[i-1] }); } forecastSeries.setData(forecastData); } } else { forecastSeries.setData([]); } }
@@ -927,31 +924,18 @@ async function loadChartData(symbol, days) {
     }
 }
 
-// ============================================================
-// 20. WATCHLIST RENDERING (with loading skeleton)
-// ============================================================
+// Watchlist rendering
 function showWatchlistSkeleton() {
     const container = document.getElementById('watchlist-container');
     if (!container) return;
-    const skeletonHtml = `
-        <div class="animate-pulse">
-            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
-            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
-            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
-            <div class="h-8 bg-neutral-800 rounded mb-2"></div>
-            <div class="h-8 bg-neutral-800 rounded"></div>
-        </div>
-    `;
+    const skeletonHtml = `<div class="animate-pulse"><div class="h-8 bg-neutral-800 rounded mb-2"></div><div class="h-8 bg-neutral-800 rounded mb-2"></div><div class="h-8 bg-neutral-800 rounded mb-2"></div><div class="h-8 bg-neutral-800 rounded mb-2"></div><div class="h-8 bg-neutral-800 rounded"></div></div>`;
     container.innerHTML = skeletonHtml;
 }
-
 async function renderWatchlist() {
     showWatchlistSkeleton();
     const table = document.createElement('table');
     table.className = "w-full text-left text-xs font-mono";
-    table.innerHTML = `<thead><tr class="text-[#a0a0a0] text-[10px] border-b border-[#282828]/40">
-        <th class="pb-1">★</th><th class="pb-1">SYMBOL / COMPANY</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th>
-       </tr></thead><tbody id="watchlist-tbody"></tbody>`;
+    table.innerHTML = `<thead><tr class="text-[#a0a0a0] text-[10px] border-b border-[#282828]/40"><th class="pb-1">★</th><th class="pb-1">SYMBOL / COMPANY</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th></tr></thead><tbody id="watchlist-tbody"></tbody>`;
     const container = document.getElementById('watchlist-container');
     container.innerHTML = '';
     container.appendChild(table);
@@ -985,12 +969,7 @@ async function renderWatchlist() {
     applyWatchlistFilters();
     if (tbody.children.length === 0) container.innerHTML = '<div class="watchlist-placeholder">No quote data – check Finnhub API key and backend.</div>';
 }
-
-function refreshAllQuotes() {
-    quoteCache = {};
-    renderWatchlist();
-}
-
+function refreshAllQuotes() { quoteCache = {}; renderWatchlist(); }
 function updateWatchlistRow(sym, data) {
     const row = document.getElementById(`wst-row-${sym}`);
     if (!row || !data) return;
@@ -1008,17 +987,23 @@ function updateWatchlistRow(sym, data) {
 async function changeActiveSymbol(symbol) { currentSymbol = symbol; document.getElementById('stock-symbol').innerText = symbol; document.getElementById('trade-symbol').value = symbol; await loadQuote(symbol); let days = 30; if (currentInterval === '1D') days = 1; else if (currentInterval === '1W') days = 7; else if (currentInterval === '3M') days = 90; else days = 30; await loadChartData(symbol, days); updateTotalPreview(); }
 function changeInterval(interval) { currentInterval = interval; ['1D','1W','1M','3M'].forEach(btn => { const el = document.getElementById(`btn-${btn}`); if (el) el.className = btn === interval ? 'px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold text-[10px]' : 'px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded text-[10px]'; }); let days = 30; if (interval === '1D') days = 1; else if (interval === '1W') days = 7; else if (interval === '3M') days = 90; else days = 30; loadChartData(currentSymbol, days); }
 
-// ============================================================
-// 21. THEME TOGGLE
-// ============================================================
+// Theme toggle
 function setTheme(theme) {
     try {
         if (theme === 'light') {
             document.body.classList.add('light-theme');
             if (chart) {
                 chart.applyOptions({
-                    layout: { background: { color: '#ffffff' }, textColor: '#000000' },
-                    grid: { vertLines: { color: '#e0e0e0' }, horzLines: { color: '#e0e0e0' } }
+                    layout: {
+                        background: { color: '#ffffff' },
+                        textColor: '#000000'
+                    },
+                    grid: {
+                        vertLines: { color: '#e0e0e0' },
+                        horzLines: { color: '#e0e0e0' }
+                    },
+                    rightPriceScale: { textColor: '#000000' },
+                    timeScale: { textColor: '#000000' }
                 });
                 const container = document.getElementById('chart-container');
                 if (container && container.clientWidth > 0 && container.clientHeight > 0) {
@@ -1042,8 +1027,16 @@ function setTheme(theme) {
             document.body.classList.remove('light-theme');
             if (chart) {
                 chart.applyOptions({
-                    layout: { background: { color: '#000000' }, textColor: '#a0a0a0' },
-                    grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } }
+                    layout: {
+                        background: { color: '#000000' },
+                        textColor: '#a0a0a0'
+                    },
+                    grid: {
+                        vertLines: { color: '#1a1a1a' },
+                        horzLines: { color: '#1a1a1a' }
+                    },
+                    rightPriceScale: { textColor: '#a0a0a0' },
+                    timeScale: { textColor: '#a0a0a0' }
                 });
                 const container = document.getElementById('chart-container');
                 if (container && container.clientWidth > 0 && container.clientHeight > 0) {
@@ -1075,24 +1068,26 @@ function toggleTheme() { const current = localStorage.getItem('theme') || 'dark'
 document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
 setTheme(localStorage.getItem('theme') || 'dark');
 
-// ============================================================
-// 22. KEYBOARD SHORTCUTS
-// ============================================================
+// Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); executeQuickTrade('BUY'); }
     if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); executeQuickTrade('SELL'); }
     if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); sellAllShares(); }
 });
 
-// ============================================================
-// 23. HELPER FUNCTIONS
-// ============================================================
+// Helper functions
 async function fetchWithTimeout(url, timeoutMs = 20000) { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), timeoutMs); try { const res = await fetch(url, { signal: controller.signal }); clearTimeout(timeout); return res; } catch (err) { clearTimeout(timeout); throw err; } }
 function safeString(value) { if (value === null || value === undefined) return ''; if (typeof value === 'string') return value; if (typeof value === 'object') { if (Array.isArray(value) && value.length > 0) return safeString(value[0]); if (value._) return safeString(value._); return ''; } return String(value); }
 async function fetchNews() { const container = document.getElementById('news-container'); container.innerHTML = '<div class="text-gray-500 text-center py-4">Loading news...</div>'; try { const res = await fetchWithTimeout(NEWS_PROXY, 15000); const data = await res.json(); if (data.news && data.news.length) { container.innerHTML = ''; data.news.forEach(item => { const title = safeString(item.title) || 'No title'; const link = safeString(item.link) || '#'; const source = safeString(item.source) || 'Yahoo Finance'; let pubDate; try { pubDate = new Date(safeString(item.pubDate)); if (isNaN(pubDate)) throw new Error(); } catch(e) { pubDate = new Date(); } const timeAgo = getTimeAgo(pubDate); const div = document.createElement('div'); div.className = 'news-item'; div.innerHTML = `<div class="news-title"><a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(title)}</a></div><div class="news-meta"><span>${escapeHtml(source)}</span><span>${timeAgo}</span></div>`; container.appendChild(div); }); } else container.innerHTML = '<div class="text-gray-500 text-center py-4">No news available</div>'; } catch (err) { console.error('News fetch error:', err); container.innerHTML = '<div class="text-red-500 text-center py-4">Failed to load news</div>'; } }
 function getTimeAgo(date) { const seconds = Math.floor((new Date() - date) / 1000); if (seconds < 60) return 'just now'; const minutes = Math.floor(seconds / 60); if (minutes < 60) return `${minutes} min ago`; const hours = Math.floor(minutes / 60); if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`; const days = Math.floor(hours / 24); return `${days} day${days > 1 ? 's' : ''} ago`; }
 function escapeHtml(str) { if (!str) return ''; return String(str).replace(/[&<>]/g, m => m === '&' ? '&amp;' : (m === '<' ? '&lt;' : (m === '>' ? '&gt;' : m))); }
 function appendCopilotMessage(sender, text, colorClass = '') { const chat = document.getElementById('copilot-chat'); const div = document.createElement('div'); div.className = `p-2 rounded ${colorClass} bg-neutral-900/50 mb-1`; div.innerHTML = `<strong class="text-bbCyan block text-[10px]">${sender}</strong><div class="whitespace-pre-wrap">${text}</div>`; chat.appendChild(div); chat.scrollTop = chat.scrollHeight; }
+
+// Advanced AI Copilot with actions (Phase 4)
+const RATE_LIMIT_COUNT = 3, RATE_LIMIT_WINDOW = 60000;
+let aiTimestamps = [];
+function isRateLimited() { const now = Date.now(); aiTimestamps = aiTimestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW); return aiTimestamps.length >= RATE_LIMIT_COUNT; }
+
 async function sendCopilotMessage() {
     const input = document.getElementById('copilot-input');
     const prompt = input.value.trim();
@@ -1104,7 +1099,6 @@ async function sendCopilotMessage() {
     aiTimestamps.push(Date.now());
     appendCopilotMessage('YOU', prompt, 'text-bbAmber');
     input.value = '';
-    
     try {
         const res = await fetch(AI_PROXY, {
             method: 'POST',
@@ -1113,14 +1107,58 @@ async function sendCopilotMessage() {
         });
         const data = await res.json();
         if (data.action) {
-            // Execute trade automatically
-            const { type, symbol, qty } = data.action;
-            document.getElementById('trade-symbol').value = symbol;
-            document.getElementById('trade-qty').value = qty;
-            executeQuickTrade(type);
-            appendCopilotMessage('AI', data.text, 'text-bbCyan');
+            const { action, symbol, qty, value, indicator } = data.action;
+            switch (action) {
+                case 'BUY':
+                case 'SELL':
+                    document.getElementById('trade-symbol').value = symbol;
+                    document.getElementById('trade-qty').value = qty;
+                    executeQuickTrade(action);
+                    appendCopilotMessage('AI', data.text, 'text-bbCyan');
+                    break;
+                case 'SET_INTERVAL':
+                    if (value && ['1D','1W','1M','3M'].includes(value)) {
+                        changeInterval(value);
+                        appendCopilotMessage('AI', `Chart interval changed to ${value}.`, 'text-bbCyan');
+                    } else {
+                        appendCopilotMessage('AI', 'Invalid interval. Use 1D, 1W, 1M, or 3M.', 'text-bbCyan');
+                    }
+                    break;
+                case 'ADD_TO_WATCHLIST':
+                    if (symbol && !watchlistSymbols.includes(symbol)) {
+                        watchlistSymbols.push(symbol);
+                        renderWatchlist();
+                        appendCopilotMessage('AI', `Added ${symbol} to watchlist.`, 'text-bbCyan');
+                    } else {
+                        appendCopilotMessage('AI', `${symbol} already in watchlist or invalid.`, 'text-bbCyan');
+                    }
+                    break;
+                case 'RUN_BACKTEST':
+                    if (symbol && qty && indicator) {
+                        const strategySymbolSelect = document.getElementById('strategy-symbol');
+                        const strategyIndicatorSelect = document.getElementById('strategy-indicator');
+                        const strategyQtyInput = document.getElementById('strategy-qty');
+                        if (strategySymbolSelect && strategyIndicatorSelect && strategyQtyInput) {
+                            strategySymbolSelect.value = symbol;
+                            strategyIndicatorSelect.value = indicator;
+                            strategyQtyInput.value = qty;
+                            if (typeof window.runBacktest === 'function') {
+                                window.runBacktest();
+                                appendCopilotMessage('AI', `Running backtest for ${symbol} using ${indicator}...`, 'text-bbCyan');
+                            } else {
+                                appendCopilotMessage('AI', 'Backtest function not available.', 'text-red-500');
+                            }
+                        } else {
+                            appendCopilotMessage('AI', 'Backtest UI elements missing.', 'text-red-500');
+                        }
+                    } else {
+                        appendCopilotMessage('AI', 'Backtest requires symbol, indicator, and quantity.', 'text-red-500');
+                    }
+                    break;
+                default:
+                    appendCopilotMessage('AI', data.text, 'text-bbCyan');
+            }
         } else if (data.text) {
-            // Check if text contains actionable patterns and add buttons
             let html = data.text;
             const tradeMatch = html.match(/(?:buy|sell)\s+(\d+(?:\.\d+)?)\s+([A-Z.^]+)/gi);
             if (tradeMatch) {
@@ -1147,13 +1185,8 @@ async function sendCopilotMessage() {
 function toggleHelpModal() { document.getElementById('help-modal').classList.toggle('hidden'); }
 function updateClock() { document.getElementById('terminal-clock').innerText = new Date().toUTCString().replace('GMT', 'UTC'); }
 setInterval(updateClock, 1000); updateClock();
-const RATE_LIMIT_COUNT = 3, RATE_LIMIT_WINDOW = 60000;
-let aiTimestamps = [];
-function isRateLimited() { const now = Date.now(); aiTimestamps = aiTimestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW); return aiTimestamps.length >= RATE_LIMIT_COUNT; }
 
-// ============================================================
-// 24. RESIZABLE PANELS
-// ============================================================
+// Resizable panes
 function initResizablePanes() {
     const leftPane = document.getElementById('left-pane');
     const centerPane = document.getElementById('center-pane');
@@ -1164,7 +1197,6 @@ function initResizablePanes() {
     let startX = 0, startLeftWidth = 0, startCenterWidth = 0, startRightWidth = 0;
     let activeHandle = null;
     let rafId = null;
-
     function applyResizeAndRefresh(newLeft, newCenter, newRight) {
         leftPane.style.flex = newLeft;
         centerPane.style.flex = newCenter;
@@ -1172,7 +1204,6 @@ function initResizablePanes() {
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => { refreshChartSize(); rafId = null; });
     }
-
     function onResizeMove(clientX) {
         if (!activeHandle) return;
         const dx = clientX - startX;
@@ -1188,7 +1219,6 @@ function initResizablePanes() {
             if (newCenter >= 2 && newRight >= 1.5) applyResizeAndRefresh(startLeftWidth, newCenter, newRight);
         }
     }
-
     function startResize(e, handle) {
         e.preventDefault();
         activeHandle = handle;
@@ -1204,10 +1234,8 @@ function initResizablePanes() {
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
     }
-
     function onMouseMove(e) { onResizeMove(e.clientX); }
     function onTouchMove(e) { onResizeMove(e.touches[0].clientX); }
-
     function stopResize() {
         if (!activeHandle) return;
         document.removeEventListener('mousemove', onMouseMove);
@@ -1222,7 +1250,6 @@ function initResizablePanes() {
         savePanelSizes();
         activeHandle = null;
     }
-
     function addDragEvents(handle) {
         handle.addEventListener('mousedown', (e) => { startResize(e, handle); document.addEventListener('mousemove', onMouseMove); document.addEventListener('mouseup', stopResize); });
         handle.addEventListener('touchstart', (e) => { startResize(e, handle); document.addEventListener('touchmove', onTouchMove); document.addEventListener('touchend', stopResize); });
@@ -1254,20 +1281,156 @@ function enableHorizontalScroll() {
 }
 
 // ============================================================
-// 25. INITIALISE TERMINAL
+// PERSISTENT LAYOUT (Phase 4)
+// ============================================================
+function captureLayout() {
+    const leftPane = document.getElementById('left-pane');
+    const centerPane = document.getElementById('center-pane');
+    const rightPane = document.getElementById('right-pane');
+    const strategyContent = document.getElementById('strategy-content');
+    const correlationContent = document.getElementById('correlation-content');
+    return {
+        panelSizes: {
+            left: leftPane?.style.flex || '3',
+            center: centerPane?.style.flex || '6',
+            right: rightPane?.style.flex || '3'
+        },
+        collapsedModules: {
+            strategy: strategyContent ? strategyContent.classList.contains('hidden') : false,
+            correlation: correlationContent ? correlationContent.classList.contains('hidden') : false
+        }
+    };
+}
+function applyLayout(layout) {
+    if (!layout) return;
+    if (layout.panelSizes) {
+        const left = document.getElementById('left-pane');
+        const center = document.getElementById('center-pane');
+        const right = document.getElementById('right-pane');
+        if (left) left.style.flex = layout.panelSizes.left;
+        if (center) center.style.flex = layout.panelSizes.center;
+        if (right) right.style.flex = layout.panelSizes.right;
+        setTimeout(() => refreshChartSize(), 100);
+    }
+    if (layout.collapsedModules) {
+        const strategyContent = document.getElementById('strategy-content');
+        const correlationContent = document.getElementById('correlation-content');
+        if (strategyContent && layout.collapsedModules.strategy !== undefined) {
+            if (layout.collapsedModules.strategy) strategyContent.classList.add('hidden');
+            else strategyContent.classList.remove('hidden');
+        }
+        if (correlationContent && layout.collapsedModules.correlation !== undefined) {
+            if (layout.collapsedModules.correlation) correlationContent.classList.add('hidden');
+            else correlationContent.classList.remove('hidden');
+        }
+    }
+}
+async function saveLayoutToBackend() {
+    const layout = captureLayout();
+    try {
+        await fetch('/api/user/layout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: JSON.stringify({ layout })
+        });
+        console.log('Layout saved');
+    } catch (err) { console.warn('Failed to save layout', err); }
+}
+async function loadLayoutFromBackend() {
+    try {
+        const res = await fetch('/api/user/layout', { headers: { 'Authorization': `Bearer ${authToken}` } });
+        const data = await res.json();
+        if (data.layout) applyLayout(data.layout);
+    } catch (err) { console.warn('Failed to load layout', err); }
+}
+
+// ============================================================
+// PORTRAIT MODE REORDERING (includes correlation & strategy modules)
+// ============================================================
+function reorderMobileLayout() {
+    const isPortrait = window.innerHeight > window.innerWidth;
+    const terminalWorkspace = document.getElementById('terminal-workspace');
+    if (!terminalWorkspace) return;
+    if (isPortrait && window.innerWidth <= 768) {
+        const watchlist = document.querySelector('.watchlist-module');
+        const chart = document.querySelector('.chart-module');
+        const trade = document.querySelector('.trade-module');
+        const strategy = document.querySelector('.strategy-module');
+        const portfolioLineChart = document.getElementById('portfolio-history-container');
+        const portfolioPieChart = document.getElementById('portfolio-composition-container');
+        const correlation = document.querySelector('.correlation-module');
+        const ai = document.querySelector('.ai-module');
+        const news = document.querySelector('.news-module');
+        let mobileContainer = document.getElementById('mobile-portrait-container');
+        if (!mobileContainer) {
+            mobileContainer = document.createElement('div');
+            mobileContainer.id = 'mobile-portrait-container';
+            mobileContainer.style.display = 'flex';
+            mobileContainer.style.flexDirection = 'column';
+            mobileContainer.style.gap = '1rem';
+            mobileContainer.style.padding = '1rem';
+            const grid = document.getElementById('main-resizable-grid');
+            grid.parentNode.insertBefore(mobileContainer, grid);
+        }
+        // Append modules in desired order
+        if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
+        if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
+        if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
+        if (strategy && strategy.parentNode !== mobileContainer) mobileContainer.appendChild(strategy);
+        if (correlation && correlation.parentNode !== mobileContainer) mobileContainer.appendChild(correlation);
+        if (portfolioLineChart && portfolioLineChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioLineChart);
+        if (portfolioPieChart && portfolioPieChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioPieChart);
+        if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
+        if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
+        const grid = document.getElementById('main-resizable-grid');
+        if (grid) grid.style.display = 'none';
+        if (mobileContainer) mobileContainer.style.display = 'flex';
+    } else {
+        const mobileContainer = document.getElementById('mobile-portrait-container');
+        if (mobileContainer) {
+            const watchlist = document.querySelector('.watchlist-module');
+            const chart = document.querySelector('.chart-module');
+            const trade = document.querySelector('.trade-module');
+            const strategy = document.querySelector('.strategy-module');
+            const portfolioLineChart = document.getElementById('portfolio-history-container');
+            const portfolioPieChart = document.getElementById('portfolio-composition-container');
+            const correlation = document.querySelector('.correlation-module');
+            const ai = document.querySelector('.ai-module');
+            const news = document.querySelector('.news-module');
+            const leftPane = document.getElementById('left-pane');
+            const centerPane = document.getElementById('center-pane');
+            const rightPane = document.getElementById('right-pane');
+            const leftContent = leftPane?.querySelector('.pane-content');
+            const centerContent = centerPane?.querySelector('.pane-content');
+            const rightContent = rightPane?.querySelector('.pane-content');
+            if (watchlist && leftContent && watchlist.parentNode !== leftContent) leftContent.insertBefore(watchlist, leftContent.firstChild);
+            if (chart && centerContent) centerContent.insertBefore(chart, centerContent.firstChild);
+            if (trade && leftContent) leftContent.appendChild(trade);
+            if (strategy && leftContent && strategy.parentNode !== leftContent) leftContent.appendChild(strategy);
+            if (correlation && rightContent && correlation.parentNode !== rightContent) rightContent.insertBefore(correlation, rightContent.firstChild);
+            if (portfolioLineChart && rightContent && portfolioLineChart.parentNode !== rightContent) rightContent.insertBefore(portfolioLineChart, correlation ? correlation.nextSibling : rightContent.firstChild);
+            if (portfolioPieChart && rightContent && portfolioPieChart.parentNode !== rightContent) rightContent.insertBefore(portfolioPieChart, portfolioLineChart?.nextSibling || rightContent.firstChild);
+            if (ai && rightContent) rightContent.insertBefore(ai, portfolioPieChart?.nextSibling || rightContent.firstChild);
+            if (news && rightContent) rightContent.appendChild(news);
+            mobileContainer.remove();
+        }
+        const grid = document.getElementById('main-resizable-grid');
+        if (grid) grid.style.display = 'flex';
+    }
+}
+
+// ============================================================
+// INITIALISE TERMINAL
 // ============================================================
 async function initTerminal() {
     restorePanelSizes();
+    await loadLayoutFromBackend();  // Phase 4: load saved workspace
     initChart();
     await renderWatchlist();
     await changeActiveSymbol('AAPL');
-
-    // Force-load prices for all holdings before saving snapshot
     const holdingsSymbols = Object.keys(portfolio.holdings);
-    if (holdingsSymbols.length > 0) {
-        await Promise.all(holdingsSymbols.map(sym => loadQuote(sym)));
-    }
-    await savePortfolioValueSnapshot();   // this will retry if prices still missing
+    if (holdingsSymbols.length > 0) await Promise.all(holdingsSymbols.map(sym => loadQuote(sym)));
+    await savePortfolioValueSnapshot();
     connectWebSocket();
     setInterval(() => updatePortfolioDisplay(), 3000);
     fetchNews();
@@ -1278,17 +1441,12 @@ async function initTerminal() {
     document.getElementById('leaderboard-btn')?.addEventListener('click', showLeaderboard);
     document.getElementById('asset-filter')?.addEventListener('change', applyWatchlistFilters);
     document.getElementById('refresh-quotes-btn')?.addEventListener('click', refreshAllQuotes);
-// After other event listeners
-document.getElementById('refresh-correlation')?.addEventListener('click', () => updateCorrelationMatrix());
-// Initial correlation load after portfolio is ready
-setTimeout(() => updateCorrelationMatrix(), 5000);
-setInterval(() => updateCorrelationMatrix(), 60000); // refresh every minute
-    
-    // Portfolio history range buttons
+    document.getElementById('refresh-correlation')?.addEventListener('click', () => updateCorrelationMatrix());
+    setTimeout(() => updateCorrelationMatrix(), 5000);
+    setInterval(() => updateCorrelationMatrix(), 60000);
     document.getElementById('portfolio-range-1w')?.addEventListener('click', () => setPortfolioHistoryRange('1W'));
     document.getElementById('portfolio-range-1m')?.addEventListener('click', () => setPortfolioHistoryRange('1M'));
     document.getElementById('portfolio-range-3m')?.addEventListener('click', () => setPortfolioHistoryRange('3M'));
-    
     document.getElementById('forecast-model')?.addEventListener('change', async () => {
         if (currentCandles.length) {
             try {
@@ -1303,255 +1461,85 @@ setInterval(() => updateCorrelationMatrix(), 60000); // refresh every minute
                         forecastData.push({ time: futureDate.toISOString().split('T')[0], value: forecastValues[i-1] });
                     }
                     forecastSeries.setData(forecastData);
-                } else {
-                    forecastSeries.setData([]);
-                }
-            } catch (err) {
-                console.warn('Forecast model change error:', err);
-                forecastSeries.setData([]);
-            }
+                } else forecastSeries.setData([]);
+            } catch (err) { console.warn('Forecast model change error:', err); forecastSeries.setData([]); }
         }
     });
     if (window.innerWidth >= 769) initResizablePanes();
     window.addEventListener('resize', () => {
-        if (window.innerWidth >= 769) {
-            if (!document.getElementById('handle1').hasListener) initResizablePanes();
-        }
+        if (window.innerWidth >= 769 && !document.getElementById('handle1').hasListener) initResizablePanes();
         refreshChartSize();
-        if (portfolioChart) {
-            setTimeout(() => updatePortfolioChart(), 100);
-        }
+        if (portfolioChart) setTimeout(() => updatePortfolioChart(), 100);
+        reorderMobileLayout(); // re-run layout on resize
     });
     enableHorizontalScroll();
     document.getElementById('apply-filter')?.addEventListener('click', applyWatchlistFilters);
     document.getElementById('favourite-filter')?.addEventListener('change', applyWatchlistFilters);
     document.getElementById('search-input')?.addEventListener('input', applyWatchlistFilters);
     
-    const portfolioCanvas = document.getElementById('portfolio-chart');
-    if (portfolioCanvas && window.ResizeObserver) {
+    // Portfolio chart resize observer with debounce
+    const portfolioContainer = document.getElementById('portfolio-history-container');
+    let portfolioChartResizeTimeout;
+    if (portfolioContainer && window.ResizeObserver) {
         new ResizeObserver(() => {
-            if (portfolioChart) {
-                setTimeout(() => updatePortfolioChart(), 100);
-            }
-        }).observe(portfolioCanvas);
+            if (portfolioChartResizeTimeout) clearTimeout(portfolioChartResizeTimeout);
+            portfolioChartResizeTimeout = setTimeout(() => {
+                if (portfolioChart) portfolioChart.resize();
+            }, 100);
+        }).observe(portfolioContainer);
     }
-    reorderMobileLayout();
-    // Force an initial portfolio composition update (ignore state check)
-    updatePortfolioComposition(0, true);
     
-    // Additional delayed composition update to catch late quotes
+    reorderMobileLayout();
+    updatePortfolioComposition(0, true);
     setTimeout(() => updatePortfolioComposition(0, true), 3000);
     setTimeout(() => updatePortfolioComposition(0, true), 6000);
-
-    // Total preview event listeners
     const tradeQtyInput = document.getElementById('trade-qty');
-    if (tradeQtyInput) {
-        tradeQtyInput.addEventListener('input', updateTotalPreview);
-    }
+    if (tradeQtyInput) tradeQtyInput.addEventListener('input', updateTotalPreview);
     const tradeSymbolInput = document.getElementById('trade-symbol');
-    if (tradeSymbolInput) {
-        tradeSymbolInput.addEventListener('change', updateTotalPreview);
-    }
+    if (tradeSymbolInput) tradeSymbolInput.addEventListener('change', updateTotalPreview);
     updateTotalPreview();
-    // Initialize Strategy Builder (backtester)
-    if (typeof initBacktester === 'function') {
-        initBacktester();
-    }
+    if (typeof initBacktester === 'function') initBacktester();
+    // Save workspace button
+    const saveWsBtn = document.getElementById('save-workspace-btn');
+    if (saveWsBtn) saveWsBtn.addEventListener('click', saveLayoutToBackend);
 }
 
 // ============================================================
-// MOBILE LAYOUT REORDERING (includes pie chart)
-// ============================================================
-function reorderMobileLayout() {
-    const isPortrait = window.innerHeight > window.innerWidth;
-    const terminalWorkspace = document.getElementById('terminal-workspace');
-    if (!terminalWorkspace) return;
-    
-    if (isPortrait && window.innerWidth <= 768) {
-        const watchlist = document.querySelector('.watchlist-module');
-        const chart = document.querySelector('.chart-module');
-        const trade = document.querySelector('.trade-module');
-        const portfolioLineChart = document.getElementById('portfolio-history-container');
-        const portfolioPieChart = document.getElementById('portfolio-composition-container');
-        const ai = document.querySelector('.ai-module');
-        const news = document.querySelector('.news-module');
-        
-        let mobileContainer = document.getElementById('mobile-portrait-container');
-        if (!mobileContainer) {
-            mobileContainer = document.createElement('div');
-            mobileContainer.id = 'mobile-portrait-container';
-            mobileContainer.style.display = 'flex';
-            mobileContainer.style.flexDirection = 'column';
-            mobileContainer.style.gap = '1rem';
-            mobileContainer.style.padding = '1rem';
-            const grid = document.getElementById('main-resizable-grid');
-            grid.parentNode.insertBefore(mobileContainer, grid);
-        }
-        
-        if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
-        if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
-        if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
-        if (portfolioLineChart && portfolioLineChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioLineChart);
-        if (portfolioPieChart && portfolioPieChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioPieChart);
-        if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
-        if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
-        
-        const grid = document.getElementById('main-resizable-grid');
-        if (grid) grid.style.display = 'none';
-        if (mobileContainer) mobileContainer.style.display = 'flex';
-    } else {
-        const mobileContainer = document.getElementById('mobile-portrait-container');
-        if (mobileContainer) {
-            const watchlist = document.querySelector('.watchlist-module');
-            const chart = document.querySelector('.chart-module');
-            const trade = document.querySelector('.trade-module');
-            const portfolioLineChart = document.getElementById('portfolio-history-container');
-            const portfolioPieChart = document.getElementById('portfolio-composition-container');
-            const ai = document.querySelector('.ai-module');
-            const news = document.querySelector('.news-module');
-            
-            const leftPane = document.getElementById('left-pane');
-            const centerPane = document.getElementById('center-pane');
-            const rightPane = document.getElementById('right-pane');
-            const leftContent = leftPane?.querySelector('.pane-content');
-            const centerContent = centerPane?.querySelector('.pane-content');
-            const rightContent = rightPane?.querySelector('.pane-content');
-            
-            if (watchlist && leftContent && watchlist.parentNode !== leftContent) leftContent.insertBefore(watchlist, leftContent.firstChild);
-            if (chart && centerContent) centerContent.insertBefore(chart, centerContent.firstChild);
-            if (trade && leftContent) leftContent.appendChild(trade);
-            if (portfolioLineChart && rightContent && portfolioLineChart.parentNode !== rightContent) rightContent.insertBefore(portfolioLineChart, rightContent.firstChild);
-            if (portfolioPieChart && rightContent && portfolioPieChart.parentNode !== rightContent) rightContent.insertBefore(portfolioPieChart, portfolioLineChart?.nextSibling || rightContent.firstChild);
-            if (ai && rightContent) rightContent.insertBefore(ai, portfolioPieChart?.nextSibling || rightContent.firstChild);
-            if (news && rightContent) rightContent.appendChild(news);
-            
-            mobileContainer.remove();
-        }
-        const grid = document.getElementById('main-resizable-grid');
-        if (grid) grid.style.display = 'flex';
-    }
-}
-
-window.addEventListener('resize', () => {
-    reorderMobileLayout();
-    setTimeout(() => {
-        if (portfolioChart) updatePortfolioChart();
-        if (chart) refreshChartSize();
-    }, 100);
-});
-
-setTimeout(reorderMobileLayout, 500);
-
-// ============================================================
-// LEADERBOARD FUNCTIONS (with improved styling)
+// LEADERBOARD & CORRELATION MATRIX (keep existing implementations)
 // ============================================================
 async function showLeaderboard() {
     const modal = document.getElementById('leaderboard-modal');
     const listContainer = document.getElementById('leaderboard-list');
     if (!modal || !listContainer) return;
-
     listContainer.innerHTML = '<div class="text-center py-4 text-gray-400">Loading leaderboard...</div>';
     modal.classList.remove('hidden');
-
     try {
-        const res = await fetch('/api/leaderboard', {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-        });
+        const res = await fetch('/api/leaderboard', { headers: { 'Authorization': `Bearer ${authToken}` } });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-
-        if (!data.leaderboard.length) {
-            listContainer.innerHTML = '<div class="text-center py-4 text-gray-400">No other users yet.</div>';
-            return;
-        }
-
-        // Build a properly styled table with explicit spacing
-        let html = '<div class="overflow-x-auto">';
-        html += '<table class="w-full text-sm border-collapse">';
-        html += '<thead><tr class="border-b border-gray-600">';
-        html += '<th class="text-left py-2 px-3 text-bbAmber">#</th>';
-        html += '<th class="text-left py-2 px-3 text-bbAmber">User</th>';
-        html += '<th class="text-right py-2 px-3 text-bbAmber">Portfolio Value</th>';
-        html += '<th class="text-right py-2 px-3 text-bbAmber">24h Change</th>';
-        html += '</tr></thead><tbody>';
-        
+        if (!data.leaderboard.length) { listContainer.innerHTML = '<div class="text-center py-4 text-gray-400">No other users yet.</div>'; return; }
+        let html = '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse"><thead><tr class="border-b border-gray-600"><th class="text-left py-2 px-3 text-bbAmber">#</th><th class="text-left py-2 px-3 text-bbAmber">User</th><th class="text-right py-2 px-3 text-bbAmber">Portfolio Value</th><th class="text-right py-2 px-3 text-bbAmber">24h Change</th></tr></thead><tbody>';
         data.leaderboard.forEach((user, idx) => {
             const changeClass = user.dayChange >= 0 ? 'text-green-500' : 'text-red-500';
             const changeSign = user.dayChange >= 0 ? '+' : '';
-            html += `<tr class="border-b border-gray-700 hover:bg-gray-800/30">
-                <td class="py-2 px-3 align-middle">${idx + 1}</td>
-                <td class="py-2 px-3 align-middle font-medium">${escapeHtml(user.username)}</td>
-                <td class="py-2 px-3 text-right font-mono align-middle">$${user.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                <td class="py-2 px-3 text-right font-mono ${changeClass} align-middle">${changeSign}$${user.dayChange.toFixed(2)} (${changeSign}${user.dayChangePct.toFixed(2)}%)</td>
-            </tr>`;
+            html += `<tr class="border-b border-gray-700 hover:bg-gray-800/30"><td class="py-2 px-3 align-middle">${idx + 1}<tr><td class="py-2 px-3 align-middle font-medium">${escapeHtml(user.username)}</td><td class="py-2 px-3 text-right font-mono align-middle">$${user.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td class="py-2 px-3 text-right font-mono ${changeClass} align-middle">${changeSign}$${user.dayChange.toFixed(2)} (${changeSign}${user.dayChangePct.toFixed(2)}%)</td></tr>`;
         });
         html += '</tbody></table></div>';
         listContainer.innerHTML = html;
-    } catch (err) {
-        listContainer.innerHTML = '<div class="text-red-500 text-center py-4">Failed to load leaderboard.</div>';
-    }
+    } catch (err) { listContainer.innerHTML = '<div class="text-red-500 text-center py-4">Failed to load leaderboard.</div>'; }
 }
+function closeLeaderboardModal() { document.getElementById('leaderboard-modal')?.classList.add('hidden'); }
 
-function closeLeaderboardModal() {
-    document.getElementById('leaderboard-modal')?.classList.add('hidden');
-}
-
-// ============================================================
-// ORDER BOOK SIMULATOR
-// ============================================================
-function renderOrderBook(bids, asks, lastPrice) {
-    const bidsContainer = document.getElementById('bids-container');
-    const asksContainer = document.getElementById('asks-container');
-    const lastPriceSpan = document.getElementById('orderbook-last-price');
-    if (!bidsContainer || !asksContainer) return;
-    
-    if (bids && bids.length) {
-        bidsContainer.innerHTML = bids.map(bid => `
-            <div class="flex justify-between text-[10px]">
-                <span class="text-green-500">${bid.price}</span>
-                <span class="text-gray-400">${bid.size}</span>
-            </div>
-        `).join('');
-    } else {
-        bidsContainer.innerHTML = '<div class="text-gray-500">No bids</div>';
-    }
-    
-    if (asks && asks.length) {
-        asksContainer.innerHTML = asks.map(ask => `
-            <div class="flex justify-between text-[10px]">
-                <span class="text-red-500">${ask.price}</span>
-                <span class="text-gray-400">${ask.size}</span>
-            </div>
-        `).join('');
-    } else {
-        asksContainer.innerHTML = '<div class="text-gray-500">No asks</div>';
-    }
-    
-    if (lastPriceSpan && lastPrice) {
-        lastPriceSpan.innerText = `Last: $${lastPrice.toFixed(2)}`;
-    }
-}
-
-// ============================================================
-// CORRELATION MATRIX HEATMAP
-// ============================================================
 async function getTopHoldingsSymbols(limit = 5) {
-    const holdings = Object.entries(portfolio.holdings)
-        .map(([sym, h]) => ({ sym, value: h.qty * (priceCache[sym]?.price || 0) }))
-        .sort((a,b) => b.value - a.value)
-        .slice(0, limit)
-        .map(item => item.sym);
-    // Always include S&P 500 as benchmark
+    const holdings = Object.entries(portfolio.holdings).map(([sym, h]) => ({ sym, value: h.qty * (priceCache[sym]?.price || 0) })).sort((a,b) => b.value - a.value).slice(0, limit).map(item => item.sym);
     if (!holdings.includes('^GSPC')) holdings.push('^GSPC');
     return holdings;
 }
-
 async function fetchHistoricalCloses(symbol, days = 30) {
     const candles = await loadHistorical(symbol, days);
     if (!candles || !candles.length) return [];
     return candles.map(c => c.close);
 }
-
 function pearsonCorrelation(x, y) {
     const n = x.length;
     if (n !== y.length || n === 0) return 0;
@@ -1564,74 +1552,53 @@ function pearsonCorrelation(x, y) {
     const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
     return denominator === 0 ? 0 : numerator / denominator;
 }
-
 async function updateCorrelationMatrix() {
     const container = document.getElementById('correlation-content');
     if (!container) return;
     container.innerHTML = '<div class="text-center text-[10px] text-gray-400 py-2">Loading correlation data...</div>';
-    
     try {
         const symbols = await getTopHoldingsSymbols(5);
-        // Fetch 30-day closes for each symbol
         const closesMap = new Map();
         for (const sym of symbols) {
             const closes = await fetchHistoricalCloses(sym, 30);
-            if (closes.length < 10) {
-                container.innerHTML = `<div class="text-red-500 text-[10px]">Insufficient data for ${sym}</div>`;
-                return;
-            }
+            if (closes.length < 10) { container.innerHTML = `<div class="text-red-500 text-[10px]">Insufficient data for ${sym}</div>`; return; }
             closesMap.set(sym, closes);
         }
-        
-        // Build matrix
         const n = symbols.length;
         const matrix = Array(n).fill().map(() => Array(n).fill(0));
-        for (let i = 0; i < n; i++) {
-            for (let j = 0; j < n; j++) {
-                const corr = pearsonCorrelation(closesMap.get(symbols[i]), closesMap.get(symbols[j]));
-                matrix[i][j] = corr;
-            }
-        }
-        
-        // Render heatmap as a table
-        let html = '<div class="overflow-x-auto"><table class="w-full text-[10px] border-collapse">';
-        // Header row
-        html += '<thead><tr><th class="p-1"></th>';
-        for (let j = 0; j < n; j++) {
-            html += `<th class="p-1 font-bold text-bbAmber">${symbols[j]}</th>`;
-        }
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) matrix[i][j] = pearsonCorrelation(closesMap.get(symbols[i]), closesMap.get(symbols[j]));
+        let html = '<div class="overflow-x-auto"><table class="w-full text-[10px] border-collapse"><thead><tr><th class="p-1"></th>';
+        for (let j = 0; j < n; j++) html += `<th class="p-1 font-bold text-bbAmber">${symbols[j]}</th>`;
         html += '</tr></thead><tbody>';
         for (let i = 0; i < n; i++) {
             html += `<tr><td class="p-1 font-bold text-bbAmber">${symbols[i]}</td>`;
             for (let j = 0; j < n; j++) {
                 const corr = matrix[i][j];
-                const color = getCorrelationColor(corr);
-                html += `<td class="p-1 text-center" style="background-color: ${color}; color: ${Math.abs(corr) > 0.5 ? 'white' : 'black'}">${corr.toFixed(2)}</td>`;
+                // Pure red-green spectrum (no blue)
+const intensity = (corr + 1) / 2; // 0 = red, 1 = green
+const red = Math.floor(255 * (1 - intensity));
+const green = Math.floor(255 * intensity);
+const blue = 0; // Remove blue entirely
+const color = `rgb(${red}, ${green}, ${blue})`;
+// Choose text color for contrast: white on dark backgrounds, black on light backgrounds
+const brightness = (red * 0.299 + green * 0.587 + blue * 0.114);
+const textColor = brightness > 140 ? '#000000' : '#ffffff';
+html += `<td class="p-1 text-center" style="background-color: ${color}; color: ${textColor}">${corr.toFixed(2)}</td>`;
             }
             html += '</tr>';
         }
         html += '</tbody></table></div>';
         container.innerHTML = html;
-    } catch (err) {
-        console.error('Correlation error:', err);
-        container.innerHTML = '<div class="text-red-500 text-[10px]">Failed to compute correlations</div>';
-    }
+    } catch (err) { console.error('Correlation error:', err); container.innerHTML = '<div class="text-red-500 text-[10px]">Failed to compute correlations</div>'; }
 }
 
-function getCorrelationColor(r) {
-    // r from -1 (red) to +1 (green)
-    const t = (r + 1) / 2; // 0..1
-    const red = Math.floor(255 * (1 - t));
-    const green = Math.floor(255 * t);
-    return `rgb(${red}, ${green}, 100)`;
-}
-
-// Collapse functions
-function toggleOrderBook() {
-    const content = document.getElementById('orderbook-content');
-    if (content) content.classList.toggle('hidden');
-}
-function toggleCorrelation() {
-    const content = document.getElementById('correlation-content');
-    if (content) content.classList.toggle('hidden');
-}
+// Expose necessary functions globally
+window.changeActiveSymbol = changeActiveSymbol;
+window.executeAIAction = executeAIAction;
+window.toggleStrategyBuilder = toggleStrategyBuilder;
+// window.runBacktest = runBacktest; // REMOVED - defined in backtester.js
+window.toggleCorrelation = toggleCorrelation;
+window.toggleHelpModal = toggleHelpModal;
+window.closeLeaderboardModal = closeLeaderboardModal;
+window.closeTradeHistoryModal = closeTradeHistoryModal;
+window.fetchNews = fetchNews;

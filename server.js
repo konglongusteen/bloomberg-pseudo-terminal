@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const WebSocket = require('ws');
 const cron = require('node-cron');
+const crypto = require('crypto'); // PHASE 4: for hash computation
 const { connectDb, getUsers, saveUser, updateUserPortfolio, getTradeHistory, saveTradeHistory, getPortfolioHistory, savePortfolioHistory } = require('./database');
 
 const app = express();
@@ -20,7 +21,6 @@ const yahooHeaders = {
     'Accept': 'application/json'
 };
 
-// Convert symbol for Yahoo: keep caret indices and .SS as is, replace . with - for stocks
 function toYahooSymbol(symbol) {
     if (symbol.startsWith('^')) return symbol;
     if (symbol === '000300.SS') return symbol;
@@ -53,7 +53,6 @@ app.post('/api/auth/register', async (req, res) => {
     const saved = await saveUser(newUser);
     if (!saved) return res.status(500).json({ error: 'Registration failed' });
 
-    // Save initial portfolio snapshot for leaderboard
     const today = new Date().toISOString().split('T')[0];
     await savePortfolioHistory(username, today, 100000);
 
@@ -103,7 +102,46 @@ app.post('/api/portfolio/sync', authenticate, async (req, res) => {
     else res.status(500).json({ error: 'Sync failed' });
 });
 
-// ---------- Trade History ----------
+// ---------- Trade History with Cryptographic Hashing (Phase 4) ----------
+// Helper: compute SHA-256 hash
+function computeTradeHash(username, trade) {
+    const { id, timestamp, symbol, action, qty, price, pnl, prevHash = '' } = trade;
+    const data = `${username}|${timestamp}|${symbol}|${action}|${qty}|${price}|${pnl || ''}|${prevHash}`;
+    return crypto.createHash('sha256').update(data).digest('hex');
+}
+
+// Override saveTradeHistory to include hash chain
+async function saveTradeHistoryWithHash(username, trades) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        // Get previous trade's hash
+        const lastTrade = await database.collection('trade_history')
+            .find({ username: username.toLowerCase() })
+            .sort({ timestamp: -1 })
+            .limit(1)
+            .toArray();
+        let prevHash = lastTrade.length ? lastTrade[0].hash : '0';
+
+        for (const trade of trades) {
+            const tradeWithPrev = { ...trade, prevHash };
+            const hash = computeTradeHash(username, tradeWithPrev);
+            tradeWithPrev.hash = hash;
+            delete tradeWithPrev.prevHash; // we store hash and prevHash separately
+            tradeWithPrev.prevHash = prevHash;
+            tradeWithPrev.hash = hash;
+
+            await database.collection('trade_history').updateOne(
+                { id: trade.id, username: username.toLowerCase() },
+                { $set: { ...tradeWithPrev, username: username.toLowerCase() } },
+                { upsert: true }
+            );
+            prevHash = hash;
+        }
+        return true;
+    } catch (err) { return false; }
+}
+
 app.get('/api/trade-history', authenticate, async (req, res) => {
     const history = await getTradeHistory(req.user.username);
     res.json({ history });
@@ -111,8 +149,28 @@ app.get('/api/trade-history', authenticate, async (req, res) => {
 
 app.post('/api/trade-history', authenticate, async (req, res) => {
     const { trades } = req.body;
-    const ok = await saveTradeHistory(req.user.username, trades);
+    const ok = await saveTradeHistoryWithHash(req.user.username, trades);
     res.json({ success: ok });
+});
+
+// Verification endpoint (Phase 4)
+app.get('/api/trade-history/verify/:id', authenticate, async (req, res) => {
+    const tradeId = parseInt(req.params.id);
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    try {
+        const trade = await db.collection('trade_history').findOne({ id: tradeId, username: req.user.username });
+        if (!trade) return res.status(404).json({ error: 'Trade not found' });
+
+        const { prevHash, id, timestamp, symbol, action, qty, price, pnl } = trade;
+        const data = `${req.user.username}|${timestamp}|${symbol}|${action}|${qty}|${price}|${pnl || ''}|${prevHash}`;
+        const recomputedHash = crypto.createHash('sha256').update(data).digest('hex');
+        const isValid = recomputedHash === trade.hash;
+
+        res.json({ valid: isValid, storedHash: trade.hash, recomputedHash });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ---------- Portfolio Value History ----------
@@ -127,7 +185,7 @@ app.get('/api/portfolio-history', authenticate, async (req, res) => {
     res.json({ history });
 });
 
-// ---------- Leaderboard (with reliable day change) ----------
+// ---------- Leaderboard ----------
 app.get('/api/leaderboard', authenticate, async (req, res) => {
     try {
         const db = await connectDb();
@@ -137,7 +195,6 @@ app.get('/api/leaderboard', authenticate, async (req, res) => {
         const leaderboard = [];
 
         for (const user of users) {
-            // Get most recent portfolio history
             const latestHistory = await db.collection('portfolio_history')
                 .find({ username: user.username })
                 .sort({ timestamp: -1 })
@@ -145,13 +202,8 @@ app.get('/api/leaderboard', authenticate, async (req, res) => {
                 .toArray();
 
             let totalValue = user.portfolio?.cash || 0;
-            if (latestHistory.length > 0) {
-                totalValue = latestHistory[0].totalValue;
-            } else {
-                totalValue = user.portfolio?.cash || 0;
-            }
+            if (latestHistory.length > 0) totalValue = latestHistory[0].totalValue;
 
-            // Get yesterday's value (if exists)
             const yesterday = new Date();
             yesterday.setDate(yesterday.getDate() - 1);
             const yesterdayStr = yesterday.toISOString().split('T')[0];
@@ -166,8 +218,7 @@ app.get('/api/leaderboard', authenticate, async (req, res) => {
                 username: user.username,
                 totalValue,
                 dayChange,
-                dayChangePct,
-                hasHistory: latestHistory.length > 0
+                dayChangePct
             });
         }
 
@@ -179,7 +230,34 @@ app.get('/api/leaderboard', authenticate, async (req, res) => {
     }
 });
 
-// ---------- Automated Daily Snapshot (Cron Job) ----------
+// ---------- User Layout (Phase 4) ----------
+app.post('/api/user/layout', authenticate, async (req, res) => {
+    const { layout } = req.body;
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    try {
+        await db.collection('users').updateOne(
+            { username: req.user.username },
+            { $set: { layout } }
+        );
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/user/layout', authenticate, async (req, res) => {
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    try {
+        const user = await db.collection('users').findOne({ username: req.user.username });
+        res.json({ layout: user?.layout || null });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ---------- Daily Snapshot Cron ----------
 cron.schedule('0 0 * * *', async () => {
     console.log('Running daily portfolio snapshot cron job...');
     try {
@@ -197,9 +275,7 @@ cron.schedule('0 0 * * *', async () => {
                 .toArray();
 
             let totalValue = user.portfolio?.cash || 0;
-            if (latestHistory.length > 0) {
-                totalValue = latestHistory[0].totalValue;
-            }
+            if (latestHistory.length > 0) totalValue = latestHistory[0].totalValue;
 
             await db.collection('portfolio_history').updateOne(
                 { username: user.username, timestamp: today },
@@ -289,7 +365,7 @@ app.get('/api/yahoo', async (req, res) => {
     }
 });
 
-// ---------- Finnhub proxy (fallback) ----------
+// ---------- Finnhub proxy ----------
 app.get('/api/finnhub', async (req, res) => {
     if (!FINNHUB_API_KEY) return res.status(500).json({ error: 'No Finnhub key' });
     const { endpoint } = req.query;
@@ -322,7 +398,7 @@ app.get('/api/news', async (req, res) => {
     }
 });
 
-// ---------- Groq AI (with slash commands & JSON actions) ----------
+// ---------- Groq AI with Extended Actions (Phase 4) ----------
 app.post('/api/copilot/query', async (req, res) => {
     if (!GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY missing' });
     const { prompt } = req.body;
@@ -342,7 +418,7 @@ app.post('/api/copilot/query', async (req, res) => {
         }
     }
     
-    // Otherwise, ask Groq to return JSON if the user wants to trade
+    // Enhanced system prompt for Phase 4 actions
     try {
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
@@ -351,7 +427,12 @@ app.post('/api/copilot/query', async (req, res) => {
                 messages: [
                     { 
                         role: 'system', 
-                        content: `You are a financial AI assistant. If the user asks to buy or sell a specific stock with a quantity, respond ONLY with a JSON object like: {"action":"BUY","symbol":"AAPL","qty":10}. If the user asks a general question, respond with normal text. Do not add any extra text.` 
+                        content: `You are a financial AI assistant. If the user asks to perform any of the following actions, respond ONLY with a JSON object:
+- Buy/sell stock: {"action":"BUY" or "SELL","symbol":"AAPL","qty":10}
+- Change chart interval: {"action":"SET_INTERVAL","value":"1D","1W","1M","3M"}
+- Add symbol to watchlist: {"action":"ADD_TO_WATCHLIST","symbol":"BTC-USD"}
+- Run a backtest: {"action":"RUN_BACKTEST","indicator":"sma_cross" or "rsi" or "bb","symbol":"AAPL","qty":10}
+If the user asks a general question, respond with normal text. Do not add extra text.` 
                     },
                     { role: 'user', content: prompt }
                 ],
@@ -362,16 +443,14 @@ app.post('/api/copilot/query', async (req, res) => {
         );
         
         let content = response.data.choices[0].message.content;
-        // Try to parse JSON
+        // Try to parse JSON action
         try {
             const jsonMatch = content.match(/\{.*\}/s);
             if (jsonMatch) {
                 const actionObj = JSON.parse(jsonMatch[0]);
-                if (actionObj.action && actionObj.symbol && actionObj.qty) {
-                    return res.json({ 
-                        text: `✓ ${actionObj.action} order: ${actionObj.qty} shares of ${actionObj.symbol}.`,
-                        action: actionObj
-                    });
+                const supportedActions = ['BUY', 'SELL', 'SET_INTERVAL', 'ADD_TO_WATCHLIST', 'RUN_BACKTEST'];
+                if (supportedActions.includes(actionObj.action)) {
+                    return res.json({ text: `Executing ${actionObj.action}...`, action: actionObj });
                 }
             }
         } catch(e) {}
@@ -458,7 +537,7 @@ app.get('/api/forecast/arima', async (req, res) => {
     }
 });
 
-// ---------- WebSocket (simulated live prices, order book removed) ----------
+// ---------- WebSocket (live price simulation) ----------
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const wss = new WebSocket.Server({ server });
 const subscribers = new Map();

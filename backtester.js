@@ -9,13 +9,15 @@ function updateStrategySymbols() {
     const select = document.getElementById('strategy-symbol');
     if (!select) return;
     select.innerHTML = '';
-    watchlistSymbols.forEach(sym => {
-        const option = document.createElement('option');
-        option.value = sym;
-        option.textContent = `${sym} - ${companyNamesMap[sym] || sym}`;
-        select.appendChild(option);
-    });
-    select.value = currentSymbol || 'AAPL';
+    if (typeof watchlistSymbols !== 'undefined') {
+        watchlistSymbols.forEach(sym => {
+            const option = document.createElement('option');
+            option.value = sym;
+            option.textContent = `${sym} - ${companyNamesMap[sym] || sym}`;
+            select.appendChild(option);
+        });
+        select.value = (typeof currentSymbol !== 'undefined') ? currentSymbol : 'AAPL';
+    }
 }
 
 // Core backtesting engine
@@ -98,25 +100,21 @@ async function runBacktest() {
     if (indicator === 'sma_cross') {
         const sma20 = calcSMA(closes, 20);
         const sma50 = calcSMA(closes, 50);
-        // Align indices (SMA arrays start at index period-1)
-        const startIdx = 49; // 50 - 1
+        const startIdx = 49;
         for (let i = startIdx; i < closes.length - 1; i++) {
-            const sma20now = sma20[i - 19]; // offset: i - (20-1)
+            const sma20now = sma20[i - 19];
             const sma50now = sma50[i - 49];
             const sma20next = sma20[i - 18];
             const sma50next = sma50[i - 48];
             const price = closes[i];
-            const nextPrice = closes[i+1];
             const date = dates[i];
             
             if (!inPosition && sma20now > sma50now && sma20next <= sma50next) {
-                // BUY signal
                 inPosition = true;
                 entryPrice = price;
                 entryDate = date;
                 positions.push({ date, action: 'BUY', price, qty, pnl: null });
             } else if (inPosition && sma20now < sma50now && sma20next >= sma50next) {
-                // SELL signal
                 const pnl = (price - entryPrice) * qty;
                 totalPnl += pnl;
                 if (pnl > 0) wins++; else if (pnl < 0) losses++;
@@ -125,7 +123,6 @@ async function runBacktest() {
                 entryPrice = 0;
             }
         }
-        // Close any open position at last price
         if (inPosition) {
             const lastPrice = closes[closes.length-1];
             const pnl = (lastPrice - entryPrice) * qty;
@@ -192,12 +189,10 @@ async function runBacktest() {
         }
     }
 
-    // Calculate metrics
     const totalTrades = positions.filter(p => p.action.startsWith('SELL')).length;
     const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
     const avgPnl = totalTrades > 0 ? totalPnl / totalTrades : 0;
     
-    // Calculate max drawdown from equity curve
     let equity = 0;
     let peak = 0;
     let maxDrawdown = 0;
@@ -228,16 +223,21 @@ async function runBacktest() {
     }
 }
 
-// Collapse function
+// Collapse function (exposed globally)
 function toggleStrategyBuilder() {
     const content = document.getElementById('strategy-content');
     if (content) content.classList.toggle('hidden');
 }
+window.toggleStrategyBuilder = toggleStrategyBuilder;
 
 // Initialization (called from initTerminal later)
 function initBacktester() {
     updateStrategySymbols();
-    document.getElementById('run-backtest')?.addEventListener('click', runBacktest);
+    const runBtn = document.getElementById('run-backtest');
+    const goBtn = document.getElementById('go-backtest');
+    if (runBtn) runBtn.addEventListener('click', runBacktest);
+    if (goBtn) goBtn.addEventListener('click', runBacktest);
+    
     // Watch for symbol changes in the main terminal to update dropdown
     const originalChangeActiveSymbol = window.changeActiveSymbol;
     if (originalChangeActiveSymbol) {
@@ -248,3 +248,6 @@ function initBacktester() {
         };
     }
 }
+
+// Expose runBacktest globally so AI can call it
+window.runBacktest = runBacktest;
