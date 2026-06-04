@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes" name="viewport"/>
-<title>Financial Terminal - 50 US Stocks</title>
+<title>Financial Terminal - 50 US Stocks + Indices</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -36,6 +36,7 @@
 <button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">HELP [F1]</button>
 <button class="bg-[#1a1a1a] border border-red-500 px-2 py-1 text-red-500 rounded text-[10px]" id="logout-btn">LOGOUT</button>
 <button id="theme-toggle" class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 rounded text-[10px]">🌓</button>
+<button id="leaderboard-btn" class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 rounded text-[10px]">🏆</button>
 </div>
 </header>
 
@@ -45,24 +46,28 @@
         <!-- LEFT PANEL -->
         <div class="resize-pane" id="left-pane" style="flex: 3;">
             <div class="pane-content space-y-3">
-                <!-- CLI module removed -->
                 <div class="bg-[#050505] border border-[#282828] p-3 flex-1 flex flex-col min-h-0 watchlist-module">
                     <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0 flex-wrap gap-2">
-                        <span class="text-bbAmber font-bold tracking-wider">WATCHLIST (50 US STOCKS)</span>
+                        <span class="text-bbAmber font-bold tracking-wider">WATCHLIST (50 US STOCKS + INDICES)</span>
                         <div class="flex items-center gap-2 flex-wrap">
-                            <input type="text" id="search-input" placeholder="Search symbol/name" class="bg-black text-[10px] border border-[#282828] rounded px-2 py-1 w-28">
+                            <input type="text" id="search-input" placeholder="Search" class="bg-black text-[10px] border border-[#282828] rounded px-2 py-1 w-24">
                             <label class="flex items-center gap-1 text-[10px]"><input type="checkbox" id="favourite-filter"> ★ only</label>
                             <select id="filter-type" class="bg-black text-[10px] border border-[#282828] rounded px-1 py-0.5">
                                 <option value="all">All</option>
                                 <option value="gainers">Gainers</option>
                                 <option value="losers">Losers</option>
                             </select>
-                            <input type="text" id="filter-value" placeholder="Min %" class="bg-black text-[10px] border border-[#282828] rounded px-1 py-0.5 w-16">
+                            <input type="text" id="filter-value" placeholder="Min %" class="bg-black text-[10px] border border-[#282828] rounded px-1 py-0.5 w-14">
+                            <select id="asset-filter" class="bg-black text-[10px] border border-[#282828] rounded px-1 py-0.5">
+                                <option value="all">All assets</option>
+                                <option value="stock">Stocks</option>
+                                <option value="index">Indices</option>
+                            </select>
                             <button id="apply-filter" class="text-[10px] text-bbAmber border border-bbAmber/40 px-1.5 py-0.5 rounded">Filter</button>
                         </div>
                     </div>
                     <div class="flex-1 overflow-y-auto pr-0.5 min-h-[250px] lg:min-h-0" id="watchlist-container">
-                        <div class="watchlist-placeholder">Loading 50 symbols...</div>
+                        <div class="watchlist-placeholder">Loading symbols...</div>
                     </div>
                 </div>
                 <div class="bg-[#050505] border border-[#282828] p-3 shrink-0 flex flex-col trade-module">
@@ -75,7 +80,7 @@
                     <div id="trade-error-message" class="error-message hidden"></div>
                     <div class="grid grid-cols-2 gap-2 text-xs mb-2">
                         <div><label class="text-[9px] text-[#a0a0a0] block">ORDER TCKR</label><input class="w-full bg-black border border-[#282828] px-2 py-2 text-bbCyan focus:outline-none uppercase text-sm" id="trade-symbol" placeholder="AAPL" type="text"/></div>
-                        <div><label class="text-[9px] text-[#a0a0a0] block">VOLUME SIZE</label><input class="w-full bg-black border border-[#282828] px-2 py-2 text-bbCyan focus:outline-none text-sm" id="trade-qty" min="1" placeholder="10" step="1" type="number" value="10"/></div>
+                        <div><label class="text-[9px] text-[#a0a0a0] block">VOLUME SIZE</label><input class="w-full bg-black border border-[#282828] px-2 py-2 text-bbCyan focus:outline-none text-sm" id="trade-qty" min="0.01" placeholder="10" step="0.01" type="number" value="10"/></div>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         <button class="bg-emerald-950 hover:bg-emerald-800 text-green-500 border border-green-500 font-bold py-1.5 transition text-xs rounded touch-manipulation" id="buy-btn">BUY (Ctrl+B)</button>
@@ -131,9 +136,9 @@
         <div class="resize-pane" id="right-pane" style="flex: 3;">
             <div class="pane-content space-y-3">
                 <div id="portfolio-history-container" class="bg-[#050505] border border-[#282828] p-3 flex flex-col min-h-[200px]">
-    <div class="text-bbAmber font-bold text-xs mb-1">PORTFOLIO VALUE HISTORY</div>
-    <canvas id="portfolio-chart" height="150" class="w-full h-32"></canvas>
-</div>
+                    <div class="text-bbAmber font-bold text-xs mb-1">PORTFOLIO VALUE HISTORY</div>
+                    <canvas id="portfolio-chart" height="150" class="w-full h-32"></canvas>
+                </div>
                 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col flex-1 min-h-0 relative ai-module" style="min-height: 320px;">
                     <div class="absolute top-0 right-0 w-16 h-0.5 bg-bbCyan"></div>
                     <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0"><span class="text-bbCyan font-bold tracking-wider">AI COPILOT</span><span class="text-[9px] bg-cyan-950 text-bbCyan px-1.5 py-0.5 rounded font-bold">GROQ</span></div>
@@ -156,6 +161,16 @@
 
 <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="trade-history-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-3xl rounded shadow-2xl relative"><div class="flex justify-between items-center border-b border-[#282828] p-3"><h3 class="text-bbAmber font-bold">TRADE HISTORY</h3><button class="text-gray-400 hover:text-white" onclick="closeTradeHistoryModal()">✖</button></div><div class="history-modal p-3"><div id="trade-history-list">No trades yet.</div></div></div></div>
 <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="help-modal"><div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-lg p-5 rounded shadow-2xl relative"><h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-[#282828] pb-1 flex justify-between items-center"><span>COMMAND DIRECTORY</span><button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">✖</button></h2><div class="space-y-3 overflow-y-auto max-h-[350px] text-[11px] text-neutral-300"><p class="text-[#a0a0a0] mb-2">Click on any symbol in the watchlist to view its chart. Use the BUY/SELL buttons or keyboard shortcuts (Ctrl+B / Ctrl+S / Ctrl+A).</p></div></div></div>
+
+<div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="leaderboard-modal">
+    <div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-lg rounded shadow-2xl relative">
+        <div class="flex justify-between items-center border-b border-[#282828] p-3">
+            <h3 class="text-bbAmber font-bold">LEADERBOARD</h3>
+            <button class="text-gray-400 hover:text-white" onclick="closeLeaderboardModal()">✖</button>
+        </div>
+        <div id="leaderboard-list" class="p-3 max-h-[70vh] overflow-y-auto"></div>
+    </div>
+</div>
 
 <script src="app.js"></script>
 </body>

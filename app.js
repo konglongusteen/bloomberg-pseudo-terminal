@@ -25,7 +25,11 @@ const companyNamesMap = {
     'SBUX': 'Starbucks Corp.', 'LOW': "Lowe's Cos", 'UPS': 'United Parcel Service', 'GE': 'General Electric',
     'IBM': 'IBM Corp.', 'CAT': 'Caterpillar Inc.', 'GS': 'Goldman Sachs', 'MS': 'Morgan Stanley',
     'C': 'Citigroup Inc.', 'PLD': 'Prologis Inc.', 'SPGI': 'S&P Global Inc.', 'BLK': 'BlackRock Inc.',
-    'T': 'AT&T Inc.', 'VZ': 'Verizon Comm.'
+    'T': 'AT&T Inc.', 'VZ': 'Verizon Comm.',
+    '^GSPC': 'S&P 500 Index',
+    '^IXIC': 'NASDAQ Composite',
+    '^N225': 'Nikkei 225',
+    'ASHR': 'CSI 300 ETF'
 };
 
 function setAuthMode(login) { isLoginMode = login; if (login) { loginConfirm.style.display = 'none'; loginSubmit.innerText = 'Login'; loginSwitch.innerText = "Don't have an account? Register"; } else { loginConfirm.style.display = 'block'; loginSubmit.innerText = 'Register'; loginSwitch.innerText = "Already have an account? Login"; } loginError.innerText = ''; }
@@ -48,7 +52,7 @@ loginSubmit.onclick = async () => {
             await loadTradeHistoryFromBackend();
             await loadPortfolioHistoryFromBackend();
             initTerminal();
-	    await savePortfolioValueSnapshot();
+            await savePortfolioValueSnapshot();
         } else {
             loginError.innerText = 'Registration successful! Please login.';
             setAuthMode(true);
@@ -82,7 +86,7 @@ async function syncTradeHistoryToBackend() {
     } catch(e) {}
 }
 function addTradeRecord(symbol, action, qty, price, pnl = null) {
-    const record = { id: Date.now(), timestamp: new Date().toISOString(), symbol, action, qty, price, pnl: pnl !== null ? pnl : (action === 'SELL' ? (qty * price - (portfolio.holdings[symbol]?.avgPrice || price) * qty) : null) };
+    const record = { id: Date.now(), timestamp: new Date().toISOString(), symbol, action, qty: parseFloat(qty.toFixed(4)), price, pnl: pnl !== null ? pnl : (action === 'SELL' ? (qty * price - (portfolio.holdings[symbol]?.avgPrice || price) * qty) : null) };
     tradeHistory.unshift(record);
     if (tradeHistory.length > 100) tradeHistory.pop();
     localStorage.setItem('trade_history', JSON.stringify(tradeHistory));
@@ -96,20 +100,18 @@ let portfolioHistory = [];
 let portfolioChart = null;
 async function savePortfolioValueSnapshot() {
     if (!authToken) return;
-    // Calculate total portfolio value: cash + market value of all holdings
     let totalValue = portfolio.cash;
     for (const [sym, h] of Object.entries(portfolio.holdings)) {
         const currentPrice = priceCache[sym]?.price || 0;
         totalValue += h.qty * currentPrice;
     }
-    const timestamp = new Date().toISOString().split('T')[0]; // daily snapshot
+    const timestamp = new Date().toISOString().split('T')[0];
     try {
         await fetch('/api/portfolio-history', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
             body: JSON.stringify({ timestamp, totalValue })
         });
-        // Update local portfolioHistory array
         const existingIndex = portfolioHistory.findIndex(h => h.timestamp === timestamp);
         if (existingIndex !== -1) {
             portfolioHistory[existingIndex].totalValue = totalValue;
@@ -144,7 +146,7 @@ function updateLastUpdatedTimestamp() {
 }
 
 // ============================================================
-// 5. WEBSOCKET (with exponential backoff & debouncing)
+// 5. WEBSOCKET
 // ============================================================
 let ws = null;
 let reconnectAttempts = 0;
@@ -190,37 +192,38 @@ function connectWebSocket() {
 }
 
 // ============================================================
-// 6. HISTORICAL DATA CACHE (1 hour TTL)
+// 6. HISTORICAL DATA CACHE
 // ============================================================
 const CACHE_TTL = 60 * 60 * 1000;
 function getCachedCandles(symbol, days) { const key = `candles_${symbol}_${days}`; const cached = localStorage.getItem(key); if (cached) { const { timestamp, data } = JSON.parse(cached); if (Date.now() - timestamp < CACHE_TTL) return data; } return null; }
 function setCachedCandles(symbol, days, candles) { localStorage.setItem(`candles_${symbol}_${days}`, JSON.stringify({ timestamp: Date.now(), data: candles })); }
 
 // ============================================================
-// 7. HAPTIC FEEDBACK (mobile)
+// 7. HAPTIC FEEDBACK
 // ============================================================
 function haptic() { if (window.navigator && window.navigator.vibrate) window.navigator.vibrate(100); }
 
-
-
 // ============================================================
-// 9. WATCHLIST FILTERS (search, gainers/losers, favourites)
+// 9. WATCHLIST FILTERS
 // ============================================================
 function applyWatchlistFilters() {
     const searchTerm = document.getElementById('search-input').value.toLowerCase();
     const filterType = document.getElementById('filter-type').value;
     const filterVal = parseFloat(document.getElementById('filter-value').value);
     const showFavOnly = document.getElementById('favourite-filter').checked;
+    const assetFilter = document.getElementById('asset-filter')?.value || 'all';
     const tbody = document.getElementById('watchlist-tbody');
     if (!tbody) return;
     const rows = Array.from(tbody.children);
     for (const row of rows) {
         const sym = row.getAttribute('data-symbol');
+        const assetType = row.getAttribute('data-asset-type');
         const data = priceCache[sym];
         const company = companyNamesMap[sym] || sym;
         let show = true;
         if (searchTerm && !sym.toLowerCase().includes(searchTerm) && !company.toLowerCase().includes(searchTerm)) show = false;
         if (show && showFavOnly && !isFavourite(sym)) show = false;
+        if (show && assetFilter !== 'all' && assetType !== assetFilter) show = false;
         if (show && filterType !== 'all') {
             if (filterType === 'gainers') show = data && data.changePct >= (isNaN(filterVal) ? 0 : filterVal);
             else if (filterType === 'losers') show = data && data.changePct <= (isNaN(filterVal) ? 0 : -filterVal);
@@ -232,18 +235,32 @@ function applyWatchlistFilters() {
 // ============================================================
 // 10. CORE VARIABLES
 // ============================================================
-const FINNHUB_PROXY = '/api/finnhub?endpoint='; const YAHOO_PROXY = '/api/yahoo?'; const YAHOO_QUOTE_PROXY = '/api/yahoo/quote?symbol='; const ALPHA_VANTAGE_PROXY = '/api/alphavantage?function=TIME_SERIES_DAILY&symbol='; const AI_PROXY = '/api/copilot/query'; const NEWS_PROXY = '/api/news'; const FORECAST_ARIMA_PROXY = '/api/forecast/arima?';
-let currentSymbol = 'AAPL', currentInterval = '1M'; let chart = null, candleSeries = null, volumeSeries = null, lineSeries = null, isLineMode = false, forecastSeries = null, showForecast = false; let priceCache = {}; let watchlistSymbols = [ 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'JPM', 'JNJ', 'V', 'PG', 'UNH', 'HD', 'DIS', 'MA', 'BAC', 'NFLX', 'ADBE', 'CRM', 'KO', 'PEP', 'TMO', 'COST', 'ABT', 'DHR', 'WMT', 'NKE', 'CVX', 'MRK', 'ABBV', 'LLY', 'AVGO', 'TXN', 'QCOM', 'AMGN', 'SBUX', 'LOW', 'UPS', 'GE', 'IBM', 'CAT', 'GS', 'MS', 'C', 'PLD', 'SPGI', 'BLK', 'T', 'VZ' ]; let portfolio = { cash: 100000.00, holdings: {} }; let currentCandles = [];
+const YAHOO_PROXY = '/api/yahoo?'; const YAHOO_QUOTE_PROXY = '/api/yahoo/quote?symbol='; const ALPHA_VANTAGE_PROXY = '/api/alphavantage?function=TIME_SERIES_DAILY&symbol='; const AI_PROXY = '/api/copilot/query'; const NEWS_PROXY = '/api/news'; const FORECAST_ARIMA_PROXY = '/api/forecast/arima?';
+let currentSymbol = 'AAPL', currentInterval = '1M'; let chart = null, candleSeries = null, volumeSeries = null, lineSeries = null, isLineMode = false, forecastSeries = null, showForecast = false; let priceCache = {}; let watchlistSymbols = [
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'JPM', 'JNJ',
+    'V', 'PG', 'UNH', 'HD', 'DIS', 'MA', 'BAC', 'NFLX', 'ADBE', 'CRM', 'KO', 'PEP',
+    'TMO', 'COST', 'ABT', 'DHR', 'WMT', 'NKE', 'CVX', 'MRK', 'ABBV', 'LLY', 'AVGO',
+    'TXN', 'QCOM', 'AMGN', 'SBUX', 'LOW', 'UPS', 'GE', 'IBM', 'CAT', 'GS', 'MS', 'C',
+    'PLD', 'SPGI', 'BLK', 'T', 'VZ',
+    '^GSPC', '^IXIC', '^N225', 'ASHR'
+]; let portfolio = { cash: 100000.00, holdings: {} }; let currentCandles = [];
+
+const assetTypeMap = {
+    '^GSPC': 'index', '^IXIC': 'index', '^N225': 'index', 'ASHR': 'index'
+};
+function getAssetType(sym) {
+    return assetTypeMap[sym] || 'stock';
+}
 
 // ============================================================
 // 11. PORTFOLIO DISPLAY & TOP MOVERS
 // ============================================================
 function updateTopMovers() { const gainers = [], losers = []; for (const sym of watchlistSymbols) { const data = priceCache[sym]; if (data && typeof data.changePct === 'number' && !isNaN(data.changePct)) { if (data.changePct >= 0) gainers.push({ sym, pct: data.changePct }); else losers.push({ sym, pct: data.changePct }); } } gainers.sort((a,b) => b.pct - a.pct); losers.sort((a,b) => a.pct - b.pct); document.getElementById('gainers-list').innerHTML = gainers.slice(0,5).map(g => `<div class="mover-item"><span>${g.sym}</span><span class="text-green-500">+${g.pct.toFixed(2)}%</span></div>`).join('') || 'None'; document.getElementById('losers-list').innerHTML = losers.slice(0,5).map(l => `<div class="mover-item"><span>${l.sym}</span><span class="text-red-500">${l.pct.toFixed(2)}%</span></div>`).join('') || 'None'; }
-function showTradeHistoryModal() { const container = document.getElementById('trade-history-list'); if (!tradeHistory.length) container.innerHTML = '<div class="text-gray-500 text-center">No trades recorded.</div>'; else { let html = '<table class="history-table"><thead><tr><th>Date</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>P&L</th></tr></thead><tbody>'; tradeHistory.forEach(t => { const pnlClass = t.pnl && t.pnl > 0 ? 'text-green-500' : (t.pnl && t.pnl < 0 ? 'text-red-500' : 'text-gray-400'); html += `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.symbol}</td><td class="${t.action === 'BUY' ? 'text-green-500' : 'text-red-500'}">${t.action}</td><td>${t.qty}</td><td>$${t.price.toFixed(2)}</td><td class="${pnlClass}">${t.pnl ? `$${t.pnl.toFixed(2)}` : '—'}</td></tr>`; }); html += '</tbody></table>'; container.innerHTML = html; } document.getElementById('trade-history-modal').classList.remove('hidden'); }
+function showTradeHistoryModal() { const container = document.getElementById('trade-history-list'); if (!tradeHistory.length) container.innerHTML = '<div class="text-gray-500 text-center">No trades recorded.</div>'; else { let html = '<table class="history-table"><thead><tr><th>Date</th><th>Symbol</th><th>Action</th><th>Qty</th><th>Price</th><th>P&L</th></tr></thead><tbody>'; tradeHistory.forEach(t => { const pnlClass = t.pnl && t.pnl > 0 ? 'text-green-500' : (t.pnl && t.pnl < 0 ? 'text-red-500' : 'text-gray-400'); html += `<tr><td>${new Date(t.timestamp).toLocaleString()}</td><td>${t.symbol}</td><td class="${t.action === 'BUY' ? 'text-green-500' : 'text-red-500'}">${t.action}</td><td>${t.qty}</td><td>$${t.price.toFixed(2)}</td><td class="${pnlClass}">${t.pnl ? `$${t.pnl.toFixed(2)}` : '—'}</tr></tr>`; }); html += '</tbody></table>'; container.innerHTML = html; } document.getElementById('trade-history-modal').classList.remove('hidden'); }
 function closeTradeHistoryModal() { document.getElementById('trade-history-modal').classList.add('hidden'); }
 
 // ============================================================
-// 12. SELL ALL (no confirmation)
+// 12. SELL ALL (supports fractional shares)
 // ============================================================
 function sellAllShares() {
     const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
@@ -262,20 +279,22 @@ function sellAllShares() {
     updatePortfolioDisplay();
     syncPortfolioToBackend();
     savePortfolioValueSnapshot();
-    errorDiv.innerText = `Sold ${qty} shares of ${sym}.`;
+    errorDiv.innerText = `Sold ${qty.toFixed(4)} shares of ${sym}.`;
     errorDiv.classList.remove('hidden');
     setTimeout(() => errorDiv.classList.add('hidden'), 3000);
     haptic();
 }
 
 // ============================================================
-// 13. BUY / SELL TRADES
+// 13. BUY / SELL TRADES (support fractional shares)
 // ============================================================
 function executeQuickTrade(action) {
     const sym = document.getElementById('trade-symbol').value.trim().toUpperCase();
-    const qty = parseFloat(document.getElementById('trade-qty').value);
+    let qty = parseFloat(document.getElementById('trade-qty').value);
     const errorDiv = document.getElementById('trade-error-message');
     if (!priceCache[sym] || isNaN(qty) || qty <= 0) { errorDiv.innerText = 'Invalid symbol or quantity'; errorDiv.classList.remove('hidden'); setTimeout(() => errorDiv.classList.add('hidden'), 3000); return; }
+    // Allow up to 4 decimal places
+    qty = parseFloat(qty.toFixed(4));
     const price = priceCache[sym].price;
     const total = price * qty;
     if (action === 'BUY') {
@@ -283,8 +302,9 @@ function executeQuickTrade(action) {
         portfolio.cash -= total;
         if (!portfolio.holdings[sym]) portfolio.holdings[sym] = { qty: 0, avgPrice: 0 };
         const h = portfolio.holdings[sym];
-        h.avgPrice = ((h.avgPrice * h.qty) + total) / (h.qty + qty);
+        const newTotalCost = (h.avgPrice * h.qty) + total;
         h.qty += qty;
+        h.avgPrice = newTotalCost / h.qty;
         addTradeRecord(sym, 'BUY', qty, price);
     } else {
         const h = portfolio.holdings[sym];
@@ -308,7 +328,7 @@ document.getElementById('sell-btn').onclick = () => executeQuickTrade('SELL');
 document.getElementById('sell-all-btn').onclick = sellAllShares;
 
 // ============================================================
-// 14. UPDATE PORTFOLIO UI
+// 14. UPDATE PORTFOLIO UI (show fractional quantities)
 // ============================================================
 window.updatePortfolioDisplay = function() {
     document.getElementById('portfolio-cash-lbl').innerText = `$${portfolio.cash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
@@ -320,7 +340,7 @@ window.updatePortfolioDisplay = function() {
         const cost = h.qty * h.avgPrice;
         const dailyPnl = (price - (priceCache[sym]?.prevClose || price)) * h.qty;
         list.innerHTML += `<span class="inline-block border border-[#282828] bg-black px-2 py-0.5 rounded text-[10px] cursor-pointer hover:bg-[#282828] transition" onclick="changeActiveSymbol('${sym}')">
-            <strong class="text-white">${sym}</strong>: ${h.qty} @ $${h.avgPrice.toFixed(2)} 
+            <strong class="text-white">${sym}</strong>: ${h.qty.toFixed(4)} @ $${h.avgPrice.toFixed(2)} 
             (<span class="${val >= cost ? 'text-green-500' : 'text-red-500'}">$${val.toLocaleString('en', { maximumFractionDigits: 2 })}</span>)
             <span class="text-[8px] ml-1 ${dailyPnl >= 0 ? 'text-green-500' : 'text-red-500'}">Δday: $${dailyPnl.toFixed(2)}</span>
         </span>`;
@@ -329,56 +349,56 @@ window.updatePortfolioDisplay = function() {
 };
 
 // ============================================================
-// 15. FAVOURITES (starred tickers)
+// 15. FAVOURITES
 // ============================================================
 let favourites = JSON.parse(localStorage.getItem('favourites')) || {};
 function toggleFavourite(sym) { favourites[sym] = !favourites[sym]; localStorage.setItem('favourites', JSON.stringify(favourites)); renderWatchlist(); }
 function isFavourite(sym) { return favourites[sym] === true; }
 
 // ============================================================
-// 16. LOAD QUOTE (with caching & fallback)
+// 16. LOAD QUOTE (Yahoo only)
 // ============================================================
 async function loadQuote(symbol) {
     const now = Date.now();
     if (quoteCache[symbol] && (now - quoteCache[symbol].timestamp < QUOTE_CACHE_TTL)) {
-        const data = quoteCache[symbol].data;
-        priceCache[symbol] = data;
-        if (symbol === currentSymbol) updateQuotePanel(data);
-        return data;
+        const cached = quoteCache[symbol].data;
+        if (cached && typeof cached.price === 'number' && !isNaN(cached.price)) {
+            priceCache[symbol] = cached;
+            if (symbol === currentSymbol) updateQuotePanel(cached);
+            return cached;
+        } else {
+            delete quoteCache[symbol];
+        }
     }
     try {
         const res = await fetchWithTimeout(YAHOO_QUOTE_PROXY + symbol, 8000);
         const data = await res.json();
         if (data.success && typeof data.price === 'number' && !isNaN(data.price)) {
-            const quoteData = { price: data.price, change: data.change, changePct: data.changePct, volume: data.volume || 0, prevClose: data.prevClose || data.price };
+            const quoteData = {
+                price: data.price,
+                change: data.change,
+                changePct: data.changePct,
+                volume: data.volume || 0,
+                prevClose: data.prevClose || data.price
+            };
             priceCache[symbol] = quoteData;
             quoteCache[symbol] = { timestamp: now, data: quoteData };
             if (symbol === currentSymbol) updateQuotePanel(quoteData);
             lastQuoteTimestamp = now;
             updateLastUpdatedTimestamp();
             return quoteData;
+        } else {
+            throw new Error('Invalid Yahoo response');
         }
-    } catch(e) { console.warn(`Yahoo quote failed for ${symbol}, trying Finnhub...`); }
-    try {
-        const res = await fetchWithTimeout(FINNHUB_PROXY + `quote?symbol=${symbol}`, 8000);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const quote = await res.json();
-        if (quote && typeof quote.c === 'number') {
-            const quoteData = { price: quote.c, change: quote.d, changePct: quote.dp, volume: quote.v, prevClose: quote.pc || quote.c };
-            priceCache[symbol] = quoteData;
-            quoteCache[symbol] = { timestamp: now, data: quoteData };
-            if (symbol === currentSymbol) updateQuotePanel(quoteData);
-            lastQuoteTimestamp = now;
-            updateLastUpdatedTimestamp();
-            return quoteData;
-        }
-    } catch(e) { console.warn(`All quote sources failed for ${symbol}`); }
-    return null;
+    } catch (err) {
+        console.warn(`Yahoo quote failed for ${symbol}:`, err.message);
+        if (symbol === currentSymbol) updateQuotePanel(null);
+        return null;
+    }
 }
-function updateQuotePanel(data) { const priceEl = document.getElementById('stock-price'), changeEl = document.getElementById('stock-change'), changePctEl = document.getElementById('stock-change-pct'); if (!priceEl || !data) return; priceEl.innerText = data.price.toFixed(2); changeEl.innerText = (data.change >= 0 ? '+' : '') + data.change.toFixed(2); changePctEl.innerText = (data.changePct >= 0 ? '+' : '') + data.changePct.toFixed(2) + '%'; const cls = data.change >= 0 ? 'text-green-500' : 'text-red-500'; priceEl.className = `text-lg font-bold ${cls} font-mono`; changeEl.className = `${cls} font-bold font-mono`; changePctEl.className = `${cls} text-[10px] font-mono`; }
 
 // ============================================================
-// 17. TECHNICAL INDICATORS (RSI, MACD, Bollinger Bands, SMA)
+// 17. TECHNICAL INDICATORS
 // ============================================================
 function calculateRSI(prices, period) {
     if (prices.length < period + 1) return null;
@@ -423,7 +443,6 @@ function calculateBollingerBands(prices, period = 20, stdDev = 2) {
     return { upper: middle + stdDev * std, lower: middle - stdDev * std, middle };
 }
 function updateIndicators(candles) {
-    // Safely get DOM elements – if any are missing, skip that indicator
     const rsiValueEl = document.getElementById('rsi-value');
     const rsiSignalEl = document.getElementById('rsi-signal');
     const macdValueEl = document.getElementById('macd-value');
@@ -447,7 +466,6 @@ function updateIndicators(candles) {
 
     const closes = candles.map(c => c.close);
     
-    // RSI
     let rsi = calculateRSI(closes, 14);
     if (rsi !== null && rsiValueEl && rsiSignalEl) {
         rsiValueEl.innerHTML = rsi.toFixed(1);
@@ -459,14 +477,12 @@ function updateIndicators(candles) {
         rsiSignalEl.className = `text-[9px] ${rsi > 70 ? 'signal-bearish' : (rsi < 30 ? 'signal-bullish' : 'signal-neutral')}`;
     }
     
-    // MACD
     const macd = calculateMACD(closes);
     if (macd.macd !== null && macdValueEl && macdSignalEl) {
         macdValueEl.innerHTML = macd.macd.toFixed(2);
         macdSignalEl.innerHTML = macd.macd > 0 ? 'Bullish' : 'Bearish';
     }
     
-    // Bollinger Bands
     const bb = calculateBollingerBands(closes);
     const lastPrice = closes[closes.length - 1];
     if (bb.upper !== null && bbStatusEl && bbSignalEl) {
@@ -478,7 +494,6 @@ function updateIndicators(candles) {
         bbSignalEl.innerHTML = `Upper: ${bb.upper.toFixed(2)} / Lower: ${bb.lower.toFixed(2)}`;
     }
     
-    // MA Crossover
     const sma20 = calculateSMA(closes, 20), sma50 = calculateSMA(closes, 50);
     if (sma20 !== null && sma50 !== null && maStatusEl && maPredictionEl) {
         const isBullish = sma20 > sma50;
@@ -490,7 +505,52 @@ function updateIndicators(candles) {
 }
 
 // ============================================================
-// 18. FORECAST (LINEAR & ARIMA) – NO HARDCODED DATA
+// SAFE QUOTE PANEL UPDATE (no toFixed errors on change/changePct)
+// ============================================================
+function updateQuotePanel(data) {
+    const priceEl = document.getElementById('stock-price');
+    const changeEl = document.getElementById('stock-change');
+    const changePctEl = document.getElementById('stock-change-pct');
+    
+    if (!priceEl || !changeEl || !changePctEl) return;
+    
+    try {
+        // Validate all required numeric fields
+        const isValid = data && 
+                        typeof data.price === 'number' && !isNaN(data.price) &&
+                        typeof data.change === 'number' && !isNaN(data.change) &&
+                        typeof data.changePct === 'number' && !isNaN(data.changePct);
+        
+        if (!isValid) {
+            priceEl.innerText = '---';
+            changeEl.innerText = '---';
+            changePctEl.innerText = '---';
+            priceEl.className = 'text-lg font-bold text-gray-500 font-mono';
+            changeEl.className = 'text-gray-500 font-bold font-mono';
+            changePctEl.className = 'text-gray-500 text-[10px] font-mono';
+            return;
+        }
+        
+        priceEl.innerText = data.price.toFixed(2);
+        changeEl.innerText = (data.change >= 0 ? '+' : '') + data.change.toFixed(2);
+        changePctEl.innerText = (data.changePct >= 0 ? '+' : '') + data.changePct.toFixed(2) + '%';
+        const cls = data.change >= 0 ? 'text-green-500' : 'text-red-500';
+        priceEl.className = `text-lg font-bold ${cls} font-mono`;
+        changeEl.className = `${cls} font-bold font-mono`;
+        changePctEl.className = `${cls} text-[10px] font-mono`;
+    } catch (err) {
+        console.warn('updateQuotePanel error:', err);
+        priceEl.innerText = '---';
+        changeEl.innerText = '---';
+        changePctEl.innerText = '---';
+        priceEl.className = 'text-lg font-bold text-gray-500 font-mono';
+        changeEl.className = 'text-gray-500 font-bold font-mono';
+        changePctEl.className = 'text-gray-500 text-[10px] font-mono';
+    }
+}
+
+// ============================================================
+// 18. FORECAST
 // ============================================================
 function linearRegressionForecast(prices, daysAhead) {
     let n = prices.length;
@@ -563,7 +623,7 @@ async function updateForecastPanel(candles) {
 }
 
 // ============================================================
-// 19. CHART INITIALISATION (Lightweight Charts)
+// 19. CHART INITIALISATION
 // ============================================================
 function initChart() { const container = document.getElementById('chart-container'), parent = document.getElementById('chart-parent-container'); if (!container || !parent) return; container.innerHTML = ''; const width = parent.clientWidth || 600, height = parent.clientHeight - 80 || 400; chart = LightweightCharts.createChart(container, { width, height, layout: { background: { color: '#000000' }, textColor: '#a0a0a0' }, grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } }, crosshair: { mode: LightweightCharts.CrosshairMode.Normal }, rightPriceScale: { borderColor: '#282828' }, timeScale: { borderColor: '#282828', timeVisible: true } }); candleSeries = chart.addCandlestickSeries({ upColor: '#00ff00', downColor: '#ff3333', borderDownColor: '#ff3333', borderUpColor: '#00ff00', wickDownColor: '#ff3333', wickUpColor: '#00ff00' }); volumeSeries = chart.addHistogramSeries({ color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: 'volume', lineWidth: 1, priceLineVisible: false }); chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } }); lineSeries = chart.addLineSeries({ color: '#dfb257', lineWidth: 2, priceLineVisible: false }); if (lineSeries && typeof lineSeries.applyOptions === 'function') lineSeries.applyOptions({ visible: false }); else if (lineSeries && typeof lineSeries.setVisible === 'function') lineSeries.setVisible(false); forecastSeries = chart.addLineSeries({ color: '#ffaa00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, title: 'Forecast' }); if (forecastSeries && typeof forecastSeries.applyOptions === 'function') forecastSeries.applyOptions({ visible: showForecast }); else if (forecastSeries && typeof forecastSeries.setVisible === 'function') forecastSeries.setVisible(showForecast); new ResizeObserver(() => { if (chart) { const newWidth = parent.clientWidth, newHeight = parent.clientHeight - 80; if (newWidth > 0 && newHeight > 0) chart.resize(newWidth, newHeight); } }).observe(parent); }
 function toggleChartType() { isLineMode = document.getElementById('line-mode-toggle').checked; if (candleSeries && lineSeries) { if (typeof candleSeries.applyOptions === 'function') candleSeries.applyOptions({ visible: !isLineMode }); else if (typeof candleSeries.setVisible === 'function') candleSeries.setVisible(!isLineMode); if (typeof lineSeries.applyOptions === 'function') lineSeries.applyOptions({ visible: isLineMode }); else if (typeof lineSeries.setVisible === 'function') lineSeries.setVisible(isLineMode); } }
@@ -632,16 +692,16 @@ async function loadChartData(symbol, days) {
 }
 
 // ============================================================
-// 20. WATCHLIST RENDERING (no drag & drop, with filters)
+// 20. WATCHLIST RENDERING
 // ============================================================
 async function renderWatchlist() {
     const container = document.getElementById('watchlist-container');
-    container.innerHTML = '<div class="watchlist-placeholder">Loading 50 symbols...</div>';
+    container.innerHTML = '<div class="watchlist-placeholder">Loading symbols...</div>';
     const table = document.createElement('table');
     table.className = "w-full text-left text-xs font-mono";
     table.innerHTML = `<thead><tr class="text-[#a0a0a0] text-[10px] border-b border-[#282828]/40">
         <th class="pb-1">★</th><th class="pb-1">SYMBOL / COMPANY</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th>
-    </tr></thead><tbody id="watchlist-tbody"></tbody>`;
+      </tr></thead><tbody id="watchlist-tbody"></tbody>`;
     container.innerHTML = '';
     container.appendChild(table);
     const tbody = document.getElementById('watchlist-tbody');
@@ -657,6 +717,7 @@ async function renderWatchlist() {
         const tr = document.createElement('tr');
         tr.id = `wst-row-${sym}`;
         tr.setAttribute('data-symbol', sym);
+        tr.setAttribute('data-asset-type', getAssetType(sym));
         tr.className = "border-b border-[#282828]/20 hover:bg-white/5 cursor-pointer transition align-middle touch-manipulation";
         tr.onclick = (e) => { if (!e.target.closest('.favourite-star')) changeActiveSymbol(sym); };
         const company = companyNamesMap[sym] || sym;
@@ -691,29 +752,24 @@ async function changeActiveSymbol(symbol) { currentSymbol = symbol; document.get
 function changeInterval(interval) { currentInterval = interval; ['1D','1W','1M','3M'].forEach(btn => { const el = document.getElementById(`btn-${btn}`); if (el) el.className = btn === interval ? 'px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold text-[10px]' : 'px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded text-[10px]'; }); let days = 30; if (interval === '1D') days = 1; else if (interval === '1W') days = 7; else if (interval === '3M') days = 90; else days = 30; loadChartData(currentSymbol, days); }
 
 // ============================================================
-// 21. THEME TOGGLE (Light / Dark)
+// 21. THEME TOGGLE
 // ============================================================
 function updatePortfolioChart() {
     const canvas = document.getElementById('portfolio-chart');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    // If canvas has zero size, wait a bit and retry (fixes mobile disappearing)
     if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
         console.warn('Portfolio chart canvas has zero size, retrying in 200ms');
         setTimeout(() => updatePortfolioChart(), 200);
         return;
     }
-
     if (portfolioChart) portfolioChart.destroy();
-    
     const labels = portfolioHistory.map(h => h.timestamp);
     const values = portfolioHistory.map(h => h.totalValue);
     const isLightTheme = document.body.classList.contains('light-theme');
     const textColor = isLightTheme ? '#000000' : '#e2e2e2';
     const gridColor = isLightTheme ? '#dddddd' : '#282828';
-    
     portfolioChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -761,7 +817,6 @@ function setTheme(theme) {
                 }
                 chart.timeScale().fitContent();
             }
-            // Update portfolio chart colors for light mode
             if (portfolioChart) {
                 portfolioChart.options.plugins.legend.labels.color = '#000000';
                 portfolioChart.options.scales.y.ticks.color = '#000000';
@@ -783,7 +838,6 @@ function setTheme(theme) {
                 }
                 chart.timeScale().fitContent();
             }
-            // Update portfolio chart colors for dark mode
             if (portfolioChart) {
                 portfolioChart.options.plugins.legend.labels.color = '#e2e2e2';
                 portfolioChart.options.scales.y.ticks.color = '#e2e2e2';
@@ -805,7 +859,7 @@ document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
 setTheme(localStorage.getItem('theme') || 'dark');
 
 // ============================================================
-// 22. KEYBOARD SHORTCUTS (Ctrl+B, Ctrl+S, Ctrl+A)
+// 22. KEYBOARD SHORTCUTS
 // ============================================================
 document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); executeQuickTrade('BUY'); }
@@ -814,7 +868,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ============================================================
-// 23. HELPER FUNCTIONS (fetch, news, AI, clock, rate limit)
+// 23. HELPER FUNCTIONS
 // ============================================================
 async function fetchWithTimeout(url, timeoutMs = 20000) { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), timeoutMs); try { const res = await fetch(url, { signal: controller.signal }); clearTimeout(timeout); return res; } catch (err) { clearTimeout(timeout); throw err; } }
 function safeString(value) { if (value === null || value === undefined) return ''; if (typeof value === 'string') return value; if (typeof value === 'object') { if (Array.isArray(value) && value.length > 0) return safeString(value[0]); if (value._) return safeString(value._); return ''; } return String(value); }
@@ -831,7 +885,7 @@ let aiTimestamps = [];
 function isRateLimited() { const now = Date.now(); aiTimestamps = aiTimestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW); return aiTimestamps.length >= RATE_LIMIT_COUNT; }
 
 // ============================================================
-// 24. RESIZABLE PANELS (mouse + touch)
+// 24. RESIZABLE PANELS
 // ============================================================
 function initResizablePanes() {
     const leftPane = document.getElementById('left-pane');
@@ -948,6 +1002,8 @@ async function initTerminal() {
     setInterval(() => savePortfolioValueSnapshot(), 3600000);
     document.getElementById('terminal-mode-badge').innerText = 'LIVE DATA';
     document.getElementById('trade-history-btn').onclick = showTradeHistoryModal;
+    document.getElementById('leaderboard-btn')?.addEventListener('click', showLeaderboard);
+    document.getElementById('asset-filter')?.addEventListener('change', applyWatchlistFilters);
     document.getElementById('forecast-model')?.addEventListener('change', async () => {
         if (currentCandles.length) {
             try {
@@ -977,7 +1033,6 @@ async function initTerminal() {
             if (!document.getElementById('handle1').hasListener) initResizablePanes();
         }
         refreshChartSize();
-        // Redraw portfolio chart on resize (fixes mobile disappearance)
         if (portfolioChart) {
             setTimeout(() => updatePortfolioChart(), 100);
         }
@@ -987,7 +1042,6 @@ async function initTerminal() {
     document.getElementById('favourite-filter')?.addEventListener('change', applyWatchlistFilters);
     document.getElementById('search-input')?.addEventListener('input', applyWatchlistFilters);
     
-    // ADD THIS: ResizeObserver for portfolio chart canvas (mobile fix)
     const portfolioCanvas = document.getElementById('portfolio-chart');
     if (portfolioCanvas && window.ResizeObserver) {
         new ResizeObserver(() => {
@@ -996,26 +1050,25 @@ async function initTerminal() {
             }
         }).observe(portfolioCanvas);
     }
-// Inside initTerminal(), after all other code
-reorderMobileLayout();
+    reorderMobileLayout();
 }
 
-// Mobile portrait layout reordering
+// ============================================================
+// MOBILE LAYOUT REORDERING
+// ============================================================
 function reorderMobileLayout() {
     const isPortrait = window.innerHeight > window.innerWidth;
     const terminalWorkspace = document.getElementById('terminal-workspace');
     if (!terminalWorkspace) return;
     
     if (isPortrait && window.innerWidth <= 768) {
-        // Get all required elements by ID (robust)
         const watchlist = document.querySelector('.watchlist-module');
         const chart = document.querySelector('.chart-module');
         const trade = document.querySelector('.trade-module');
-        const portfolioChartContainer = document.getElementById('portfolio-history-container'); // now using ID
+        const portfolioChartContainer = document.getElementById('portfolio-history-container');
         const ai = document.querySelector('.ai-module');
         const news = document.querySelector('.news-module');
         
-        // Create mobile container if not exists
         let mobileContainer = document.getElementById('mobile-portrait-container');
         if (!mobileContainer) {
             mobileContainer = document.createElement('div');
@@ -1028,7 +1081,6 @@ function reorderMobileLayout() {
             grid.parentNode.insertBefore(mobileContainer, grid);
         }
         
-        // Move elements in desired order
         if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
         if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
         if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
@@ -1036,12 +1088,10 @@ function reorderMobileLayout() {
         if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
         if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
         
-        // Hide original grid
         const grid = document.getElementById('main-resizable-grid');
         if (grid) grid.style.display = 'none';
         if (mobileContainer) mobileContainer.style.display = 'flex';
     } else {
-        // Landscape or desktop: restore original layout
         const mobileContainer = document.getElementById('mobile-portrait-container');
         if (mobileContainer) {
             const watchlist = document.querySelector('.watchlist-module');
@@ -1072,15 +1122,57 @@ function reorderMobileLayout() {
     }
 }
 
-// Listen for orientation and resize events
 window.addEventListener('resize', () => {
     reorderMobileLayout();
-    // Also refresh chart if needed
     setTimeout(() => {
         if (portfolioChart) updatePortfolioChart();
         if (chart) refreshChartSize();
     }, 100);
 });
 
-// Call initially after login and after DOM ready
 setTimeout(reorderMobileLayout, 500);
+
+// ============================================================
+// LEADERBOARD FUNCTIONS
+// ============================================================
+async function showLeaderboard() {
+    const modal = document.getElementById('leaderboard-modal');
+    const listContainer = document.getElementById('leaderboard-list');
+    if (!modal || !listContainer) return;
+
+    listContainer.innerHTML = '<div class="text-center py-4">Loading leaderboard...</div>';
+    modal.classList.remove('hidden');
+
+    try {
+        const res = await fetch('/api/leaderboard', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        if (!data.leaderboard.length) {
+            listContainer.innerHTML = '<div class="text-center py-4">No other users yet.</div>';
+            return;
+        }
+
+        let html = '<table class="w-full text-xs"><thead><tr class="border-b border-[#282828]"><th class="text-left py-1">Rank</th><th class="text-left py-1">User</th><th class="text-right py-1">Portfolio Value</th><th class="text-right py-1">24h Change</th><tr></thead><tbody>';
+        data.leaderboard.forEach((user, idx) => {
+            const changeClass = user.dayChange >= 0 ? 'text-green-500' : 'text-red-500';
+            const changeSign = user.dayChange >= 0 ? '+' : '';
+            html += `<tr class="border-b border-[#282828]/40">
+                        <td class="py-1">${idx + 1}</td>
+                        <td class="py-1">${escapeHtml(user.username)}</td>
+                        <td class="py-1 text-right font-mono">$${user.totalValue.toFixed(2)}</td>
+                        <td class="py-1 text-right font-mono ${changeClass}">${changeSign}$${user.dayChange.toFixed(2)} (${changeSign}${user.dayChangePct.toFixed(2)}%)</td>
+                      </tr>`;
+        });
+        html += '</tbody></table>';
+        listContainer.innerHTML = html;
+    } catch (err) {
+        listContainer.innerHTML = '<div class="text-red-500 text-center py-4">Failed to load leaderboard.</div>';
+    }
+}
+
+function closeLeaderboardModal() {
+    document.getElementById('leaderboard-modal')?.classList.add('hidden');
+}

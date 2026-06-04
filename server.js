@@ -13,15 +13,18 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-// Helper to fix Yahoo symbols (BRK.B -> BRK-B)
-function toYahooSymbol(symbol) {
-    return symbol.replace(/\./g, '-');
-}
-
+// Yahoo API headers
 const yahooHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Accept': 'application/json'
 };
+
+// Convert symbol for Yahoo: keep caret indices and .SS as is, replace . with - for stocks
+function toYahooSymbol(symbol) {
+    if (symbol.startsWith('^')) return symbol;
+    if (symbol === '000300.SS') return symbol;
+    return symbol.replace(/\./g, '-');
+}
 
 app.use(cors());
 app.use(express.json());
@@ -48,6 +51,10 @@ app.post('/api/auth/register', async (req, res) => {
     };
     const saved = await saveUser(newUser);
     if (!saved) return res.status(500).json({ error: 'Registration failed' });
+
+    // ---------- Leaderboard reliability fix: save initial portfolio snapshot ----------
+    const today = new Date().toISOString().split('T')[0];
+    await savePortfolioHistory(username, today, 100000);
 
     res.json({ message: 'Registered' });
 });
@@ -95,7 +102,7 @@ app.post('/api/portfolio/sync', authenticate, async (req, res) => {
     else res.status(500).json({ error: 'Sync failed' });
 });
 
-// ---------- Trade History (MongoDB) ----------
+// ---------- Trade History ----------
 app.get('/api/trade-history', authenticate, async (req, res) => {
     const history = await getTradeHistory(req.user.username);
     res.json({ history });
@@ -119,7 +126,60 @@ app.get('/api/portfolio-history', authenticate, async (req, res) => {
     res.json({ history });
 });
 
-// ---------- Yahoo Finance Quote (robust) ----------
+// ---------- Leaderboard (with reliable day change) ----------
+app.get('/api/leaderboard', authenticate, async (req, res) => {
+    try {
+        const db = await connectDb();
+        if (!db) return res.status(500).json({ error: 'Database error' });
+
+        const users = await db.collection('users').find({}).toArray();
+        const leaderboard = [];
+
+        for (const user of users) {
+            // Get most recent portfolio history
+            const latestHistory = await db.collection('portfolio_history')
+                .find({ username: user.username })
+                .sort({ timestamp: -1 })
+                .limit(1)
+                .toArray();
+
+            let totalValue = user.portfolio?.cash || 0;
+            if (latestHistory.length > 0) {
+                totalValue = latestHistory[0].totalValue;
+            } else {
+                // Fallback: cash only (should not happen after registration fix)
+                totalValue = user.portfolio?.cash || 0;
+            }
+
+            // Get yesterday's value (if exists)
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            const yesterdayHistory = await db.collection('portfolio_history')
+                .findOne({ username: user.username, timestamp: yesterdayStr });
+
+            const previousValue = yesterdayHistory ? yesterdayHistory.totalValue : totalValue;
+            const dayChange = totalValue - previousValue;
+            const dayChangePct = previousValue !== 0 ? (dayChange / previousValue) * 100 : 0;
+
+            leaderboard.push({
+                username: user.username,
+                totalValue,
+                dayChange,
+                dayChangePct,
+                hasHistory: latestHistory.length > 0
+            });
+        }
+
+        leaderboard.sort((a, b) => b.totalValue - a.totalValue);
+        res.json({ leaderboard });
+    } catch (err) {
+        console.error('Leaderboard error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ---------- Yahoo Finance Quote ----------
 app.get('/api/yahoo/quote', async (req, res) => {
     const { symbol } = req.query;
     if (!symbol) return res.status(400).json({ error: 'Symbol required' });
@@ -145,7 +205,7 @@ app.get('/api/yahoo/quote', async (req, res) => {
         });
     } catch (err) {
         console.error(`Yahoo quote error ${symbol}:`, err.message);
-        // Fallback to Finnhub
+        // Fallback to Finnhub if available
         if (FINNHUB_API_KEY) {
             try {
                 const finnUrl = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
@@ -196,7 +256,7 @@ app.get('/api/yahoo', async (req, res) => {
     }
 });
 
-// ---------- Finnhub proxy (for fallback) ----------
+// ---------- Finnhub proxy (fallback) ----------
 app.get('/api/finnhub', async (req, res) => {
     if (!FINNHUB_API_KEY) return res.status(500).json({ error: 'No Finnhub key' });
     const { endpoint } = req.query;
@@ -255,7 +315,7 @@ app.post('/api/copilot/query', async (req, res) => {
     }
 });
 
-// ---------- ARIMA forecast (unchanged) ----------
+// ---------- ARIMA forecast ----------
 async function fetchHistoricalPrices(symbol, days = 60) {
     const yahooSym = toYahooSymbol(symbol);
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
@@ -330,7 +390,7 @@ app.get('/api/forecast/arima', async (req, res) => {
     }
 });
 
-// ---------- WebSocket (unchanged) ----------
+// ---------- WebSocket (simulated live prices) ----------
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const wss = new WebSocket.Server({ server });
 const subscribers = new Map();
