@@ -530,3 +530,18 @@ body.light-theme #profile-modal .bg-black {
         max-height: 150px;
     }
 }
+
+/* Macro Dashboard, Fundamentals, Risk Metrics */
+.macro-module, .fundamentals-module, .risk-metrics-module {
+    transition: all 0.2s;
+}
+#macro-content.hidden, #fundamentals-content.hidden {
+    display: none;
+}
+.collapse-arrow {
+    font-size: 10px;
+    transition: transform 0.2s;
+}
+#fundamentals-data div {
+    word-break: break-word;
+}

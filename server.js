@@ -27,6 +27,8 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const FRED_API_KEY = process.env.FRED_API_KEY;          // NEW: for macroeconomic data
+const ALPHA_VANTAGE_KEY = process.env.ALPHA_VANTAGE_KEY; // NEW: for fundamentals
 
 // Redis client (optional)
 let redisClient = null;
@@ -202,6 +204,126 @@ app.post('/api/portfolio/sync', authenticate, async (req, res) => {
     else res.status(500).json({ error: 'Sync failed' });
 });
 
+// ========== RISK METRICS (Sharpe, Sortino, Max Drawdown) ==========
+app.get('/api/portfolio/risk', authenticate, async (req, res) => {
+    try {
+        const db = await connectDb();
+        if (!db) return res.status(500).json({ error: 'Database error' });
+
+        const history = await db.collection('portfolio_history')
+            .find({ username: req.user.username })
+            .sort({ timestamp: 1 })
+            .toArray();
+
+        if (history.length < 2) {
+            return res.json({ sharpe: null, sortino: null, maxDrawdown: null, message: 'Need at least 2 days of history' });
+        }
+
+        const values = history.map(h => h.totalValue);
+        const returns = [];
+        for (let i = 1; i < values.length; i++) {
+            returns.push((values[i] - values[i-1]) / values[i-1]);
+        }
+
+        // Risk-free rate (use 10Y Treasury from FRED or default 2%)
+        let riskFreeRate = 0.02;
+        if (FRED_API_KEY) {
+            try {
+                const fredRes = await axios.get(`https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key=${FRED_API_KEY}&file_type=json&limit=1&sort_order=desc`);
+                const latest = fredRes.data.observations[0];
+                if (latest && latest.value) riskFreeRate = parseFloat(latest.value) / 100;
+            } catch(e) { console.warn('Could not fetch risk-free rate, using default 2%'); }
+        }
+
+        const meanReturn = returns.reduce((a,b) => a + b, 0) / returns.length;
+        const excessReturns = returns.map(r => r - riskFreeRate);
+        const stdDev = Math.sqrt(returns.map(r => Math.pow(r - meanReturn, 2)).reduce((a,b) => a + b, 0) / returns.length);
+        const sharpe = stdDev === 0 ? 0 : (meanReturn - riskFreeRate) / stdDev;
+
+        // Sortino (downside deviation)
+        const downsideReturns = returns.filter(r => r < 0);
+        const downsideDev = downsideReturns.length ? Math.sqrt(downsideReturns.map(r => Math.pow(r, 2)).reduce((a,b) => a + b, 0) / downsideReturns.length) : 0;
+        const sortino = downsideDev === 0 ? 0 : (meanReturn - riskFreeRate) / downsideDev;
+
+        // Max Drawdown
+        let peak = values[0];
+        let maxDrawdown = 0;
+        for (let i = 1; i < values.length; i++) {
+            if (values[i] > peak) peak = values[i];
+            const drawdown = (peak - values[i]) / peak;
+            if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+        }
+
+        res.json({ sharpe: sharpe.toFixed(3), sortino: sortino.toFixed(3), maxDrawdown: (maxDrawdown * 100).toFixed(2) + '%' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== MACRO DASHBOARD (FRED) ==========
+app.get('/api/fred/:seriesId', async (req, res) => {
+    const { seriesId } = req.params;
+    if (!FRED_API_KEY) return res.status(500).json({ error: 'FRED_API_KEY missing' });
+    const cacheKey = `fred:${seriesId}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return res.json(cached);
+
+    try {
+        const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${FRED_API_KEY}&file_type=json`;
+        const response = await axios.get(url, { timeout: 10000 });
+        const observations = response.data.observations.filter(o => o.value !== '.').map(o => ({
+            date: o.date,
+            value: parseFloat(o.value)
+        }));
+        const result = { seriesId, data: observations };
+        await setCache(cacheKey, result, 86400); // cache 24h
+        res.json(result);
+    } catch (err) {
+        console.error(`FRED error for ${seriesId}:`, err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== CORPORATE FUNDAMENTALS (Alpha Vantage) ==========
+app.get('/api/fundamentals/:symbol', async (req, res) => {
+    const { symbol } = req.params;
+    if (!ALPHA_VANTAGE_KEY) return res.status(500).json({ error: 'ALPHA_VANTAGE_KEY missing' });
+    const cacheKey = `fundamentals:${symbol}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return res.json(cached);
+
+    try {
+        // Fetch overview data
+        const overviewUrl = `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${symbol}&apikey=${ALPHA_VANTAGE_KEY}`;
+        const overviewRes = await axios.get(overviewUrl, { timeout: 10000 });
+        const overview = overviewRes.data;
+        if (!overview || Object.keys(overview).length === 0) throw new Error('No overview data');
+
+        const fundamentals = {
+            symbol: overview.Symbol,
+            name: overview.Name,
+            marketCap: overview.MarketCapitalization,
+            peRatio: overview.PERatio,
+            eps: overview.EPS,
+            dividendYield: overview.DividendYield,
+            beta: overview.Beta,
+            fiftyTwoWeekHigh: overview['52WeekHigh'],
+            fiftyTwoWeekLow: overview['52WeekLow'],
+            revenueTTM: overview.RevenueTTM,
+            grossProfitTTM: overview.GrossProfitTTM,
+            profitMargin: overview.ProfitMargin,
+            debtToEquity: overview.DebtToEquityRatio
+        };
+
+        await setCache(cacheKey, fundamentals, 86400);
+        res.json(fundamentals);
+    } catch (err) {
+        console.error(`Fundamentals error for ${symbol}:`, err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ========== CONDITIONAL ORDERS ==========
 app.post('/api/orders/conditional', authenticate, async (req, res) => {
     const { symbol, type, triggerPrice, quantity, trailingPercent } = req.body;
@@ -247,26 +369,23 @@ setInterval(async () => {
         const symbols = [...new Set(activeOrders.map(o => o.symbol))];
         const prices = {};
         for (const sym of symbols) {
-    // First priority: use the simulated price from WebSocket
-    if (simulatedPrices.has(sym)) {
-        prices[sym] = simulatedPrices.get(sym);
-    } else {
-        // Fallback: cached Yahoo quote
-        const cached = await getCache(`quote:${sym}`);
-        if (cached && cached.price) {
-            prices[sym] = cached.price;
-        } else {
-            // Last resort: fetch daily close from Yahoo
-            try {
-                const yahooSym = toYahooSymbol(sym);
-                const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
-                const resp = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders, timeout: 5000 });
-                const lastClose = resp.data.chart.result[0]?.indicators.quote[0]?.close.slice(-1)[0];
-                if (lastClose) prices[sym] = lastClose;
-            } catch (e) { console.warn(`Order checker: cannot get price for ${sym}`); }
+            if (simulatedPrices.has(sym)) {
+                prices[sym] = simulatedPrices.get(sym);
+            } else {
+                const cached = await getCache(`quote:${sym}`);
+                if (cached && cached.price) {
+                    prices[sym] = cached.price;
+                } else {
+                    try {
+                        const yahooSym = toYahooSymbol(sym);
+                        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
+                        const resp = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders, timeout: 5000 });
+                        const lastClose = resp.data.chart.result[0]?.indicators.quote[0]?.close.slice(-1)[0];
+                        if (lastClose) prices[sym] = lastClose;
+                    } catch (e) { console.warn(`Order checker: cannot get price for ${sym}`); }
+                }
+            }
         }
-    }
-}
 
         for (const order of activeOrders) {
             const currentPrice = prices[order.symbol];
@@ -493,10 +612,9 @@ app.get('/api/yahoo/quote', async (req, res) => {
         res.json(quoteData);
     } catch (err) {
         console.error(`Yahoo quote error ${symbol}:`, err.message);
-        const alphaKey = process.env.ALPHA_VANTAGE_KEY;
-        if (alphaKey) {
+        if (ALPHA_VANTAGE_KEY) {
             try {
-                const alphaUrl = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${alphaKey}`;
+                const alphaUrl = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${ALPHA_VANTAGE_KEY}`;
                 const alphaRes = await axios.get(alphaUrl, { timeout: 5000 });
                 const q = alphaRes.data['Global Quote'];
                 if (q && q['05. price']) {
@@ -546,10 +664,9 @@ app.get('/api/yahoo', async (req, res) => {
         res.json({ success: true, data });
     } catch (err) {
         console.error(`Yahoo chart error ${symbol}:`, err.message);
-        const alphaKey = process.env.ALPHA_VANTAGE_KEY;
-        if (alphaKey) {
+        if (ALPHA_VANTAGE_KEY) {
             try {
-                const alphaUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${alphaKey}`;
+                const alphaUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${ALPHA_VANTAGE_KEY}`;
                 const alphaRes = await axios.get(alphaUrl, { timeout: 10000 });
                 const ts = alphaRes.data['Time Series (Daily)'];
                 if (ts) {
@@ -748,7 +865,6 @@ const wss = new WebSocket.Server({ server });
 const subscribers = new Map();
 const simulatedPrices = new Map();
 
-
 wss.on('connection', ws => {
     ws.on('message', msg => {
         try {
@@ -779,10 +895,8 @@ setInterval(async () => {
         } catch(e) {}
         const change = (Math.random() - 0.5) * price * 0.01;
         const newPrice = price + change;
-        // Store the simulated price for the order checker
         simulatedPrices.set(symbol, newPrice);
         const msg = JSON.stringify({ type: 'trade', symbol, price: newPrice });
         clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
     }
 }, 5000);
-

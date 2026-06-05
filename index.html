@@ -101,7 +101,7 @@
                         <button class="w-full bg-amber-950 hover:bg-amber-800 text-bbAmber border border-bbAmber font-bold py-1.5 transition text-xs rounded touch-manipulation" id="sell-all-btn">SELL ALL (current symbol)</button>
                     </div>
                 </div>
-                <!-- Conditional Orders Panel (NEW) -->
+                <!-- Conditional Orders Panel -->
                 <div class="bg-[#050505] border border-[#282828] p-3 shrink-0 flex flex-col conditional-orders-module">
                     <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs">
                         <span class="text-bbAmber font-bold tracking-wider">⏳ CONDITIONAL ORDERS</span>
@@ -252,14 +252,87 @@
                         <div class="text-center text-[10px] text-gray-400 py-2">Loading correlation data...</div>
                     </div>
                 </div>
+
+                <!-- ========== RISK METRICS WIDGET ========== -->
+                <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col risk-metrics-module">
+                    <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs">
+                        <span class="text-bbAmber font-bold tracking-wider">📊 PORTFOLIO RISK METRICS</span>
+                        <button id="refresh-risk-metrics" class="text-[9px] text-bbAmber border border-bbAmber/40 px-1.5 py-0.5 rounded">⟳</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-[11px]" id="risk-metrics-container">
+                        <div>Sharpe Ratio:</div><div id="risk-sharpe" class="font-bold text-right">--</div>
+                        <div>Sortino Ratio:</div><div id="risk-sortino" class="font-bold text-right">--</div>
+                        <div>Max Drawdown:</div><div id="risk-maxdd" class="font-bold text-right">--</div>
+                    </div>
+                </div>
+
+                <!-- ========== MACRO DASHBOARD (FRED) ========== -->
+                <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col macro-module">
+                    <div class="flex justify-between items-center cursor-pointer" onclick="toggleMacroDashboard()">
+                        <span class="text-bbAmber font-bold text-xs">🏦 MACRO DASHBOARD (FRED)</span>
+                        <span class="text-[10px] text-gray-400 collapse-arrow" id="macro-arrow">▼</span>
+                    </div>
+                    <div id="macro-content" class="mt-2 space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px]">
+                            <div><span class="text-gray-400">10Y Treasury:</span><br><span id="macro-dgs10" class="font-bold">--</span></div>
+                            <div><span class="text-gray-400">2Y Treasury:</span><br><span id="macro-dgs2" class="font-bold">--</span></div>
+                            <div><span class="text-gray-400">10Y-2Y Spread:</span><br><span id="macro-spread" class="font-bold">--</span></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-[10px]">
+                            <div><span class="text-gray-400">CPI (YoY):</span><br><span id="macro-cpi" class="font-bold">--</span></div>
+                            <div><span class="text-gray-400">Fed Funds Rate:</span><br><span id="macro-fed" class="font-bold">--</span></div>
+                        </div>
+                        <div class="text-center">
+                            <button id="refresh-macro" class="text-[9px] text-bbAmber border border-bbAmber/40 px-2 py-0.5 rounded">⟳ Refresh</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== CORPORATE FUNDAMENTALS ========== -->
+                <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col fundamentals-module">
+                    <div class="flex justify-between items-center cursor-pointer" onclick="toggleFundamentals()">
+                        <span class="text-bbAmber font-bold text-xs">📄 CORPORATE FUNDAMENTALS</span>
+                        <span class="text-[10px] text-gray-400 collapse-arrow" id="fund-arrow">▼</span>
+                    </div>
+                    <div id="fundamentals-content" class="mt-2 space-y-2">
+                        <div class="flex gap-2">
+                            <input type="text" id="fund-symbol" placeholder="Symbol (e.g., AAPL)" class="bg-black text-[10px] border border-[#282828] rounded px-2 py-1 flex-1">
+                            <button id="fetch-fundamentals" class="bg-bbAmber/20 text-bbAmber border border-bbAmber/40 px-2 py-1 rounded text-[10px]">Fetch</button>
+                        </div>
+                        <div id="fundamentals-data" class="text-[9px] grid grid-cols-2 gap-x-2 gap-y-1 max-h-48 overflow-y-auto">
+                            <div class="text-gray-400 col-span-2 text-center">Enter a symbol and click Fetch</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI COPILOT -->
                 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col flex-1 min-h-0 relative ai-module" style="min-height: 320px;">
                     <div class="absolute top-0 right-0 w-16 h-0.5 bg-bbCyan"></div>
                     <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0"><span class="text-bbCyan font-bold tracking-wider">AI COPILOT</span><span class="text-[9px] bg-cyan-950 text-bbCyan px-1.5 py-0.5 rounded font-bold">GROQ</span></div>
                     <div class="flex-1 overflow-y-auto pr-1 mb-3 space-y-3 text-xs flex flex-col select-text" id="copilot-chat"><div class="bg-black/50 border-l-2 border-bbCyan p-2 text-[#a0a0a0]"><strong class="text-bbCyan block text-[10px]">SYSTEM</strong>AI assistant active. Ask about markets, technicals, or predictions. Try "/buy 5 AAPL" or "buy 10 shares of TSLA".</div></div>
                     <div class="mt-auto shrink-0 border-t border-[#282828]/40 pt-2"><div class="flex bg-black border border-[#282828] focus-within:border-bbCyan transition rounded overflow-hidden"><input class="w-full bg-black text-bbCyan font-mono text-xs focus:outline-none p-2" id="copilot-input" placeholder="Ask AI or type /buy 5 AAPL..." type="text"/><button class="bg-cyan-950 hover:bg-cyan-900 border-l border-[#282828] px-3 text-bbCyan text-xs transition font-bold" id="copilot-send-btn" onclick="sendCopilotMessage()">SEND</button></div></div>
                 </div>
-                <div class="bg-[#050505] border border-[#282828] p-3 movers-module"><div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs"><span class="text-bbAmber font-bold tracking-wider">TOP MOVERS</span><span class="text-[9px] text-[#a0a0a0]">from watchlist</span></div><div class="movers-container flex-col sm:flex-row gap-3 sm:gap-16 justify-between" id="top-movers-container"><div class="movers-col"><div class="text-green-500 text-[10px] mb-1">🚀 Gainers</div><div id="gainers-list">Loading...</div></div><div class="movers-col"><div class="text-red-500 text-[10px] mb-1">📉 Losers</div><div id="losers-list">Loading...</div></div></div></div>
-                <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col shrink-0 news-module" style="max-height: 260px;"><div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0"><span class="text-bbAmber font-bold tracking-wider">FINANCIAL NEWS</span><button class="refresh-btn" id="refresh-news-btn" onclick="fetchNews()">⟳</button></div><div class="flex-1 overflow-y-auto pr-1 space-y-1" id="news-container"><div class="text-gray-500 text-center py-4">Loading news...</div></div></div>
+
+                <!-- TOP MOVERS -->
+                <div class="bg-[#050505] border border-[#282828] p-3 movers-module">
+                    <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs">
+                        <span class="text-bbAmber font-bold tracking-wider">TOP MOVERS</span>
+                        <span class="text-[9px] text-[#a0a0a0]">from watchlist</span>
+                    </div>
+                    <div class="movers-container flex-col sm:flex-row gap-3 sm:gap-16 justify-between" id="top-movers-container">
+                        <div class="movers-col"><div class="text-green-500 text-[10px] mb-1">🚀 Gainers</div><div id="gainers-list">Loading...</div></div>
+                        <div class="movers-col"><div class="text-red-500 text-[10px] mb-1">📉 Losers</div><div id="losers-list">Loading...</div></div>
+                    </div>
+                </div>
+
+                <!-- NEWS -->
+                <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col shrink-0 news-module" style="max-height: 260px;">
+                    <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs shrink-0">
+                        <span class="text-bbAmber font-bold tracking-wider">FINANCIAL NEWS</span>
+                        <button class="refresh-btn" id="refresh-news-btn" onclick="fetchNews()">⟳</button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto pr-1 space-y-1" id="news-container"><div class="text-gray-500 text-center py-4">Loading news...</div></div>
+                </div>
             </div>
         </div>
     </div>
@@ -332,7 +405,6 @@
                 • Toggle between dark/light mode using the 🌓 button.<br>
                 • Save your panel layout (resized columns, collapsed modules) with <span class="text-bbCyan">💾 SAVE WS</span> – it will restore on next login.</p>
             </div>
-
             <!-- Profile & Account Management -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">👤 PROFILE SETTINGS</div>
@@ -342,7 +414,6 @@
                 • <strong>Two‑Factor Authentication (2FA):</strong> Enable TOTP via Google Authenticator for extra security.<br>
                 • Permanently delete your account – all portfolio, trade history, and snapshots will be erased.</p>
             </div>
-
             <!-- Conditional Orders -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">⏳ CONDITIONAL ORDERS</div>
@@ -352,13 +423,11 @@
                 • <span class="text-bbCyan">Trailing Stop (%)</span>: Sell if price drops X% from its highest price since order creation.<br>
                 Orders are checked every 5 seconds and execute as market sells. Active orders are shown and can be cancelled.</p>
             </div>
-
             <!-- My Assets Module -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">💼 MY ASSETS</div>
                 <p>Displays all your current holdings with quantity, total value, and daily P&amp;L. Click any asset to jump to its chart. Use the search box to filter by symbol. This module appears in the left panel (desktop) and is reordered in portrait mode between the trade module and strategy builder.</p>
             </div>
-
             <!-- Correlation Matrix -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📈 CORRELATION MATRIX (30-day)</div>
@@ -368,7 +437,6 @@
                 • Use it to detect over‑concentration: if many stocks are highly correlated (e.g., >0.7), your portfolio may lack diversification.<br>
                 • Click the <span class="text-bbCyan">⟳</span> button to refresh the matrix. The panel is collapsible.</p>
             </div>
-
             <!-- Strategy Builder (Backtester) -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📊 STRATEGY BUILDER (Backtester)</div>
@@ -378,7 +446,6 @@
                 • <span class="text-bbCyan">Bollinger Bands:</span> Buys when price touches lower band, sells when price touches upper band.<br>
                 • Results show total P&amp;L, total trades, win rate, average P&amp;L per trade, max drawdown, and a full trade log.</p>
             </div>
-
             <!-- AI Copilot -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">🤖 AI COPILOT (Groq)</div>
@@ -388,7 +455,6 @@
                 • Advanced actions: <span class="text-bbCyan">"change chart to 3M"</span>, <span class="text-bbCyan">"add BTC-USD to watchlist"</span>, <span class="text-bbCyan">"run SMA crossover backtest on AAPL with 5 shares"</span>.<br>
                 • Rate‑limited to 3 queries per minute.</p>
             </div>
-
             <!-- Technical Indicators & Forecast -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📉 TECHNICAL INDICATORS & FORECAST</div>
@@ -396,7 +462,6 @@
                 • Forecast models: Linear regression (frontend) or ARIMA (backend – uses Yahoo data). Toggle <span class="text-bbCyan">Forecast</span> to see a 5‑day price projection on the chart.<br>
                 • You can switch between candlestick and line chart.</p>
             </div>
-
             <!-- Portfolio & Trade History -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📋 PORTFOLIO & TRADE HISTORY</div>
@@ -404,7 +469,34 @@
                 • The <span class="text-bbCyan">TRADE HISTORY</span> button opens a modal with all your past trades. Each trade has a <span class="text-bbCyan">Verify</span> button – this checks the cryptographic signature (SHA-256 hash chain) to ensure the trade record has not been tampered with (audit trail).<br>
                 • The Portfolio Value History chart shows your total portfolio value over time (1W/1M/3M ranges). The Portfolio Composition doughnut chart shows the percentage of cash vs each holding, with a colour legend on the right in landscape mode.</p>
             </div>
+<!-- Risk Metrics -->
+<div>
+    <div class="text-bbAmber font-bold text-xs mb-1">📊 PORTFOLIO RISK METRICS</div>
+    <p>Quantitative evaluation of your trading performance:<br>
+    • <span class="text-bbCyan">Sharpe Ratio</span> – risk-adjusted return (higher is better, >1 is good).<br>
+    • <span class="text-bbCyan">Sortino Ratio</span> – focuses only on downside volatility.<br>
+    • <span class="text-bbCyan">Max Drawdown</span> – largest peak-to-trough decline in portfolio value.<br>
+    These are calculated from your daily portfolio snapshots. The risk‑free rate uses the 10‑year Treasury yield (FRED) or a default 2%.</p>
+</div>
 
+<!-- Macro Dashboard -->
+<div>
+    <div class="text-bbAmber font-bold text-xs mb-1">🏦 MACRO DASHBOARD (FRED)</div>
+    <p>Live economic indicators from the Federal Reserve Economic Data (FRED):<br>
+    • <span class="text-bbCyan">10Y & 2Y Treasury yields</span> – key for bond markets and recession signals (inverted curve when 2Y > 10Y).<br>
+    • <span class="text-bbCyan">CPI (YoY)</span> – Consumer Price Index, a primary inflation measure.<br>
+    • <span class="text-bbCyan">Fed Funds Rate</span> – central bank policy rate.<br>
+    Data updates daily, cached for 24h. Requires a free FRED API key (set <span class="text-bbCyan">FRED_API_KEY</span> in .env).</p>
+</div>
+
+<!-- Corporate Fundamentals -->
+<div>
+    <div class="text-bbAmber font-bold text-xs mb-1">📄 CORPORATE FUNDAMENTALS</div>
+    <p>Deep dive into any stock’s financial health using Alpha Vantage data:<br>
+    • Enter a symbol (e.g., AAPL) and click <span class="text-bbCyan">Fetch</span>.<br>
+    • Displays Market Cap, P/E, EPS, Dividend Yield, Beta, 52‑week range, Revenue, Profit Margin, Debt/Equity.<br>
+    • Data is cached for 24 hours to respect API rate limits. Requires a free Alpha Vantage key (<span class="text-bbCyan">ALPHA_VANTAGE_KEY</span> in .env).</p>
+</div>
             <!-- Watchlist & Filters -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">🔍 WATCHLIST & FILTERS</div>
@@ -413,20 +505,17 @@
                 • Click the refresh (⟳) button to reload all quotes.<br>
                 • Symbols flash green (up) or red (down) on price changes.</p>
             </div>
-
             <!-- Persistent Workspace -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">💾 PERSISTENT WORKSPACE</div>
                 <p>• Resize the left/center/right panels by dragging the gray handles. Collapse any expandable section (Strategy Builder, Correlation Matrix).<br>
                 • Click <span class="text-bbCyan">💾 SAVE WS</span> to store your panel sizes and collapsed states to your user profile. On next login, your workspace will be restored exactly as you left it.</p>
             </div>
-
             <!-- Leaderboard -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">🏆 LEADERBOARD</div>
                 <p>Compares all registered users by their latest portfolio total value. Shows 24h absolute and percentage change. Sorted descending by total value. Access via the trophy button in the header.</p>
             </div>
-
             <!-- News & Top Movers -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📰 NEWS & TOP MOVERS</div>
@@ -449,5 +538,24 @@
 
 <script src="app.js"></script>
 <script src="backtester.js"></script>
+<script>
+// Temporary placeholders for macro and fundamentals – will be overridden by app.js
+window.toggleMacroDashboard = window.toggleMacroDashboard || function() {
+    const content = document.getElementById('macro-content');
+    const arrow = document.getElementById('macro-arrow');
+    if (content) {
+        content.classList.toggle('hidden');
+        if (arrow) arrow.innerText = content.classList.contains('hidden') ? '▶' : '▼';
+    }
+};
+window.toggleFundamentals = window.toggleFundamentals || function() {
+    const content = document.getElementById('fundamentals-content');
+    const arrow = document.getElementById('fund-arrow');
+    if (content) {
+        content.classList.toggle('hidden');
+        if (arrow) arrow.innerText = content.classList.contains('hidden') ? '▶' : '▼';
+    }
+};
+</script>
 </body>
 </html>
