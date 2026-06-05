@@ -1406,7 +1406,7 @@ function reorderMobileLayout() {
         if (profileBtn) profileBtn.style.display = 'inline-block';
     } else {
         if (saveWsBtn) saveWsBtn.style.display = 'inline-block';
-        if (profileBtn) profileBtn.style.display = 'inline-block'; // show both on desktop
+        if (profileBtn) profileBtn.style.display = 'inline-block';
     }
 
     if (!terminalWorkspace) return;
@@ -1415,11 +1415,12 @@ function reorderMobileLayout() {
         const watchlist = document.querySelector('.watchlist-module');
         const chart = document.querySelector('.chart-module');
         const trade = document.querySelector('.trade-module');
+        const conditionalOrders = document.querySelector('.conditional-orders-module');
         const portfolioAssets = document.querySelector('.portfolio-assets-module');
         const strategy = document.querySelector('.strategy-module');
+        const correlation = document.querySelector('.correlation-module');
         const portfolioLineChart = document.getElementById('portfolio-history-container');
         const portfolioPieChart = document.getElementById('portfolio-composition-container');
-        const correlation = document.querySelector('.correlation-module');
         const ai = document.querySelector('.ai-module');
         const news = document.querySelector('.news-module');
 
@@ -1435,33 +1436,53 @@ function reorderMobileLayout() {
             grid.parentNode.insertBefore(mobileContainer, grid);
         }
 
-        // Append in correct order
+        // Append modules in the correct order
         if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
         if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
         if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
+        if (conditionalOrders && conditionalOrders.parentNode !== mobileContainer) mobileContainer.appendChild(conditionalOrders);
         if (portfolioAssets && portfolioAssets.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioAssets);
         if (strategy && strategy.parentNode !== mobileContainer) mobileContainer.appendChild(strategy);
-if (conditionalOrders && conditionalOrders.parentNode !== mobileContainer) mobileContainer.appendChild(conditionalOrders);
         if (correlation && correlation.parentNode !== mobileContainer) mobileContainer.appendChild(correlation);
         if (portfolioLineChart && portfolioLineChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioLineChart);
         if (portfolioPieChart && portfolioPieChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioPieChart);
         if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
         if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
+
         const grid = document.getElementById('main-resizable-grid');
         if (grid) grid.style.display = 'none';
         if (mobileContainer) mobileContainer.style.display = 'flex';
+
+        // Re-populate strategy builder symbol dropdown after moving
+        if (typeof updateStrategySymbols === 'function') {
+            updateStrategySymbols();
+        }
+        // Re-populate conditional orders symbol dropdown
+        const condSymbol = document.getElementById('cond-symbol');
+        if (condSymbol && window.watchlistSymbols) {
+            const currentVal = condSymbol.value;
+            condSymbol.innerHTML = '';
+            watchlistSymbols.forEach(sym => {
+                const opt = document.createElement('option');
+                opt.value = sym;
+                opt.textContent = sym;
+                condSymbol.appendChild(opt);
+            });
+            if (currentVal && watchlistSymbols.includes(currentVal)) condSymbol.value = currentVal;
+            else condSymbol.value = watchlistSymbols[0];
+        }
     } else {
         const mobileContainer = document.getElementById('mobile-portrait-container');
         if (mobileContainer) {
             const watchlist = document.querySelector('.watchlist-module');
             const chart = document.querySelector('.chart-module');
             const trade = document.querySelector('.trade-module');
+            const conditionalOrders = document.querySelector('.conditional-orders-module');
             const portfolioAssets = document.querySelector('.portfolio-assets-module');
             const strategy = document.querySelector('.strategy-module');
-	    const conditionalOrders = document.querySelector('.conditional-orders-module');
+            const correlation = document.querySelector('.correlation-module');
             const portfolioLineChart = document.getElementById('portfolio-history-container');
             const portfolioPieChart = document.getElementById('portfolio-composition-container');
-            const correlation = document.querySelector('.correlation-module');
             const ai = document.querySelector('.ai-module');
             const news = document.querySelector('.news-module');
 
@@ -1472,9 +1493,11 @@ if (conditionalOrders && conditionalOrders.parentNode !== mobileContainer) mobil
             const centerContent = centerPane?.querySelector('.pane-content');
             const rightContent = rightPane?.querySelector('.pane-content');
 
+            // Restore to original desktop layout
             if (watchlist && leftContent && watchlist.parentNode !== leftContent) leftContent.insertBefore(watchlist, leftContent.firstChild);
             if (chart && centerContent) centerContent.insertBefore(chart, centerContent.firstChild);
             if (trade && leftContent) leftContent.appendChild(trade);
+            if (conditionalOrders && leftContent && conditionalOrders.parentNode !== leftContent) leftContent.appendChild(conditionalOrders);
             if (portfolioAssets && leftContent && portfolioAssets.parentNode !== leftContent) leftContent.insertBefore(portfolioAssets, strategy || null);
             if (strategy && leftContent && strategy.parentNode !== leftContent) leftContent.appendChild(strategy);
             if (correlation && rightContent && correlation.parentNode !== rightContent) rightContent.insertBefore(correlation, rightContent.firstChild);
@@ -1482,15 +1505,31 @@ if (conditionalOrders && conditionalOrders.parentNode !== mobileContainer) mobil
             if (portfolioPieChart && rightContent && portfolioPieChart.parentNode !== rightContent) rightContent.insertBefore(portfolioPieChart, portfolioLineChart?.nextSibling || rightContent.firstChild);
             if (ai && rightContent) rightContent.insertBefore(ai, portfolioPieChart?.nextSibling || rightContent.firstChild);
             if (news && rightContent) rightContent.appendChild(news);
-	    if (conditionalOrders && leftContent && conditionalOrders.parentNode !== leftContent) leftContent.appendChild(conditionalOrders);
 
             mobileContainer.remove();
         }
         const grid = document.getElementById('main-resizable-grid');
         if (grid) grid.style.display = 'flex';
+
+        // Re-populate dropdowns after restoring
+        if (typeof updateStrategySymbols === 'function') {
+            updateStrategySymbols();
+        }
+        const condSymbol = document.getElementById('cond-symbol');
+        if (condSymbol && window.watchlistSymbols) {
+            const currentVal = condSymbol.value;
+            condSymbol.innerHTML = '';
+            watchlistSymbols.forEach(sym => {
+                const opt = document.createElement('option');
+                opt.value = sym;
+                opt.textContent = sym;
+                condSymbol.appendChild(opt);
+            });
+            if (currentVal && watchlistSymbols.includes(currentVal)) condSymbol.value = currentVal;
+            else condSymbol.value = watchlistSymbols[0];
+        }
     }
 }
-
 // ============================================================
 // PROFILE MODAL & ACCOUNT MANAGEMENT (MOVED BEFORE initTerminal)
 // ============================================================
