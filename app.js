@@ -1447,6 +1447,14 @@ function reorderMobileLayout() {
         if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
         if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
 
+if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
+    if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
+    if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
+    if (portfolioAssets && portfolioAssets.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioAssets);
+    if (strategy && strategy.parentNode !== mobileContainer) mobileContainer.appendChild(strategy);
+    if (conditionalOrders && conditionalOrders.parentNode !== mobileContainer) mobileContainer.appendChild(conditionalOrders); // ← ADD
+    if (correlation && correlation.parentNode !== mobileContainer) mobileContainer.appendChild(correlation);
+
         const grid = document.getElementById('main-resizable-grid');
         if (grid) grid.style.display = 'none';
         if (mobileContainer) mobileContainer.style.display = 'flex';
