@@ -247,18 +247,26 @@ setInterval(async () => {
         const symbols = [...new Set(activeOrders.map(o => o.symbol))];
         const prices = {};
         for (const sym of symbols) {
-            const cached = await getCache(`quote:${sym}`);
-            if (cached && cached.price) prices[sym] = cached.price;
-            else {
-                try {
-                    const yahooSym = toYahooSymbol(sym);
-                    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
-                    const resp = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders, timeout: 5000 });
-                    const lastClose = resp.data.chart.result[0]?.indicators.quote[0]?.close.slice(-1)[0];
-                    if (lastClose) prices[sym] = lastClose;
-                } catch (e) { console.warn(`Order checker: cannot get price for ${sym}`); }
-            }
+    // First priority: use the simulated price from WebSocket
+    if (simulatedPrices.has(sym)) {
+        prices[sym] = simulatedPrices.get(sym);
+    } else {
+        // Fallback: cached Yahoo quote
+        const cached = await getCache(`quote:${sym}`);
+        if (cached && cached.price) {
+            prices[sym] = cached.price;
+        } else {
+            // Last resort: fetch daily close from Yahoo
+            try {
+                const yahooSym = toYahooSymbol(sym);
+                const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
+                const resp = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders, timeout: 5000 });
+                const lastClose = resp.data.chart.result[0]?.indicators.quote[0]?.close.slice(-1)[0];
+                if (lastClose) prices[sym] = lastClose;
+            } catch (e) { console.warn(`Order checker: cannot get price for ${sym}`); }
         }
+    }
+}
 
         for (const order of activeOrders) {
             const currentPrice = prices[order.symbol];
@@ -738,6 +746,8 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const wss = new WebSocket.Server({ server });
 const subscribers = new Map();
+const simulatedPrices = new Map();
+
 
 wss.on('connection', ws => {
     ws.on('message', msg => {
@@ -769,6 +779,8 @@ setInterval(async () => {
         } catch(e) {}
         const change = (Math.random() - 0.5) * price * 0.01;
         const newPrice = price + change;
+        // Store the simulated price for the order checker
+        simulatedPrices.set(symbol, newPrice);
         const msg = JSON.stringify({ type: 'trade', symbol, price: newPrice });
         clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
     }
