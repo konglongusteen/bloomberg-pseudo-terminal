@@ -434,23 +434,26 @@ function updatePortfolioComposition(retry = 0, force = false) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const totalCash = portfolio.cash;
-    let totalHoldingsValue = 0;
-    const holdingsData = [];
-    const labels = [];
-    let missingPrices = false;
-    for (const [sym, h] of Object.entries(portfolio.holdings)) {
-        const price = priceCache[sym]?.price;
-        if (!price || isNaN(price)) {
-            missingPrices = true;
-            continue;
-        }
-        const value = h.qty * price;
-        if (value > 0) {
-            holdingsData.push(value);
-            labels.push(sym);
-            totalHoldingsValue += value;
-        }
+let totalHoldingsValue = 0;
+const holdingsArray = []; // temporary array to hold {sym, value}
+let missingPrices = false;
+for (const [sym, h] of Object.entries(portfolio.holdings)) {
+    const price = priceCache[sym]?.price;
+    if (!price || isNaN(price)) {
+        missingPrices = true;
+        continue;
     }
+    const value = h.qty * price;
+    if (value > 0) {
+        holdingsArray.push({ sym, value });
+        totalHoldingsValue += value;
+    }
+}
+// Sort holdings by value descending (highest first)
+holdingsArray.sort((a, b) => b.value - a.value);
+
+const holdingsData = holdingsArray.map(item => item.value);
+const labels = holdingsArray.map(item => item.sym);
     const total = totalCash + totalHoldingsValue;
     if (Object.keys(portfolio.holdings).length > 0 && total === 0 && missingPrices && retry < 15) {
         setTimeout(() => updatePortfolioComposition(retry + 1, force), 1000);
