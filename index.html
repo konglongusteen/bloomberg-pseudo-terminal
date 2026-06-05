@@ -97,7 +97,7 @@
                         <button class="w-full bg-amber-950 hover:bg-amber-800 text-bbAmber border border-bbAmber font-bold py-1.5 transition text-xs rounded touch-manipulation" id="sell-all-btn">SELL ALL (current symbol)</button>
                     </div>
                 </div>
-                <!-- NEW: Portfolio Assets Module (with search) -->
+                <!-- Portfolio Assets Module -->
                 <div class="bg-[#050505] border border-[#282828] p-3 shrink-0 flex flex-col portfolio-assets-module">
                     <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs">
                         <span class="text-bbAmber font-bold tracking-wider">💼 MY ASSETS</span>
@@ -107,7 +107,7 @@
                         <div class="text-gray-500 text-center">No holdings yet. Buy some shares!</div>
                     </div>
                 </div>
-                <!-- Strategy Builder Panel with GO button -->
+                <!-- Strategy Builder Panel -->
                 <div class="bg-[#050505] border border-[#282828] p-3 shrink-0 flex flex-col strategy-module">
                     <div class="flex justify-between items-center cursor-pointer" onclick="window.toggleStrategyBuilder ? window.toggleStrategyBuilder() : (()=>{const c=document.getElementById('strategy-content');if(c)c.classList.toggle('hidden')})()">
                         <span class="text-bbAmber font-bold text-xs">📈 STRATEGY BUILDER (Backtester)</span>
@@ -199,7 +199,7 @@
                     </div>
                     <canvas id="portfolio-chart" height="150" class="w-full h-32"></canvas>
                 </div>
-                <!-- Portfolio Composition - now flex row in landscape -->
+                <!-- Portfolio Composition - with legend -->
                 <div id="portfolio-composition-container" class="bg-[#050505] border border-[#282828] p-3 flex flex-col min-h-[200px]">
                     <div class="text-bbAmber font-bold text-xs mb-1">PORTFOLIO COMPOSITION</div>
                     <div id="composition-flex-container" class="flex flex-col lg:flex-row gap-3">
@@ -207,7 +207,7 @@
                         <div id="composition-legend" class="flex-1 text-[9px] space-y-1 overflow-y-auto max-h-32"></div>
                     </div>
                 </div>
-                <!-- CORRELATION MATRIX PANEL -->
+                <!-- CORRELATION MATRIX -->
                 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col correlation-module">
                     <div class="flex justify-between items-center">
                         <div class="flex items-center gap-2 cursor-pointer" onclick="window.toggleCorrelation ? window.toggleCorrelation() : (()=>{const c=document.getElementById('correlation-content');if(c)c.classList.toggle('hidden')})()">
@@ -269,14 +269,111 @@
 </div>
 
 <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden p-4" id="help-modal">
-    <div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-lg p-5 rounded shadow-2xl relative">
-        <h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-[#282828] pb-1 flex justify-between items-center">
-            <span>COMMAND DIRECTORY</span>
+    <div class="bg-[#0a0a0a] border-2 border-[#282828] w-full max-w-xl p-5 rounded shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <h2 class="text-bbAmber font-bold text-sm mb-3 border-b border-[#282828] pb-1 flex justify-between items-center sticky top-0 bg-[#0a0a0a] z-10">
+            <span>COMMAND DIRECTORY & FEATURE GUIDE</span>
             <button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">✖</button>
         </h2>
-        <div class="space-y-4 overflow-y-auto max-h-[450px] text-[11px] text-neutral-300">
-            <!-- content same as before, omitted for brevity but keep your existing help text -->
-            <div>...</div>
+        <div class="space-y-5 text-[11px] text-neutral-300">
+            <!-- Basic Controls -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📌 BASIC CONTROLS</div>
+                <p>• Click any symbol in the watchlist to view its chart.<br>
+                • Use BUY/SELL buttons or keyboard shortcuts: <span class="text-bbCyan">Ctrl+B</span> (Buy), <span class="text-bbCyan">Ctrl+S</span> (Sell), <span class="text-bbCyan">Ctrl+A</span> (Sell All).<br>
+                • The order total updates automatically as you change quantity.<br>
+                • Toggle between dark/light mode using the 🌓 button.<br>
+                • Save your panel layout (resized columns, collapsed modules) with <span class="text-bbCyan">💾 SAVE WS</span> – it will restore on next login.</p>
+            </div>
+
+            <!-- Profile & Account Management -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">👤 PROFILE SETTINGS</div>
+                <p>Click the <span class="text-bbCyan">👤 PROFILE</span> button to open your profile modal. There you can:<br>
+                • Change your username (you will be logged out and need to log in again).<br>
+                • Change your password (requires current password, then re‑login).<br>
+                • Permanently delete your account – all portfolio, trade history, and snapshots will be erased.</p>
+            </div>
+
+            <!-- My Assets Module -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">💼 MY ASSETS</div>
+                <p>Displays all your current holdings with quantity, total value, and daily P&amp;L. Click any asset to jump to its chart. Use the search box to filter by symbol. This module appears in the left panel (desktop) and is reordered in portrait mode between the trade module and strategy builder.</p>
+            </div>
+
+            <!-- Correlation Matrix -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📈 CORRELATION MATRIX (30-day)</div>
+                <p>Shows how closely your top 5 holdings + S&P 500 move together.<br>
+                • <span class="text-green-500">Green</span> = positive correlation (move in same direction).<br>
+                • <span class="text-red-500">Red</span> = negative correlation (move opposite).<br>
+                • Use it to detect over‑concentration: if many stocks are highly correlated (e.g., >0.7), your portfolio may lack diversification.<br>
+                • Click the <span class="text-bbCyan">⟳</span> button to refresh the matrix. The panel is collapsible.</p>
+            </div>
+
+            <!-- Strategy Builder (Backtester) -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📊 STRATEGY BUILDER (Backtester)</div>
+                <p>Simulate trading strategies using historical data (last 180 days). Choose a symbol, indicator, and quantity, then click <span class="text-bbAmber">RUN</span> or <span class="text-green-500">GO</span>.<br>
+                • <span class="text-bbCyan">SMA Crossover:</span> Buys when 20-day SMA crosses above 50-day SMA, sells on opposite cross.<br>
+                • <span class="text-bbCyan">RSI:</span> Buys when RSI drops below 30 (oversold), sells when RSI rises above 70 (overbought).<br>
+                • <span class="text-bbCyan">Bollinger Bands:</span> Buys when price touches lower band, sells when price touches upper band.<br>
+                • Results show total P&amp;L, total trades, win rate, average P&amp;L per trade, max drawdown, and a full trade log.</p>
+            </div>
+
+            <!-- AI Copilot -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">🤖 AI COPILOT (Groq)</div>
+                <p>• Ask market questions – the AI will answer concisely.<br>
+                • Use slash commands: <span class="text-bbCyan">/buy 5 AAPL</span> or <span class="text-bbCyan">/sell 10 TSLA</span> to execute trades instantly.<br>
+                • Natural language like "buy 2 shares of NVDA" will also work and generate clickable buttons.<br>
+                • Advanced actions: <span class="text-bbCyan">"change chart to 3M"</span>, <span class="text-bbCyan">"add BTC-USD to watchlist"</span>, <span class="text-bbCyan">"run SMA crossover backtest on AAPL with 5 shares"</span>.<br>
+                • Rate‑limited to 3 queries per minute.</p>
+            </div>
+
+            <!-- Technical Indicators & Forecast -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📉 TECHNICAL INDICATORS & FORECAST</div>
+                <p>• RSI (14), MACD, Bollinger Bands (20,2) are shown below the chart.<br>
+                • Forecast models: Linear regression (frontend) or ARIMA (backend – uses Yahoo data). Toggle <span class="text-bbCyan">Forecast</span> to see a 5‑day price projection on the chart.<br>
+                • You can switch between candlestick and line chart.</p>
+            </div>
+
+            <!-- Portfolio & Trade History -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📋 PORTFOLIO & TRADE HISTORY</div>
+                <p>• Your cash balance and holdings are displayed in the footer. Click any holding to jump to its chart.<br>
+                • The <span class="text-bbCyan">TRADE HISTORY</span> button opens a modal with all your past trades. Each trade has a <span class="text-bbCyan">Verify</span> button – this checks the cryptographic signature (SHA-256 hash chain) to ensure the trade record has not been tampered with (audit trail).<br>
+                • The Portfolio Value History chart shows your total portfolio value over time (1W/1M/3M ranges). The Portfolio Composition doughnut chart shows the percentage of cash vs each holding, with a colour legend on the right in landscape mode.</p>
+            </div>
+
+            <!-- Watchlist & Filters -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">🔍 WATCHLIST & FILTERS</div>
+                <p>• 50 US stocks + 4 major indices.<br>
+                • Use search, favourites (★), gainers/losers filter, and asset type filter (stock/index).<br>
+                • Click the refresh (⟳) button to reload all quotes.<br>
+                • Symbols flash green (up) or red (down) on price changes.</p>
+            </div>
+
+            <!-- Persistent Workspace -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">💾 PERSISTENT WORKSPACE</div>
+                <p>• Resize the left/center/right panels by dragging the gray handles. Collapse any expandable section (Strategy Builder, Correlation Matrix).<br>
+                • Click <span class="text-bbCyan">💾 SAVE WS</span> to store your panel sizes and collapsed states to your user profile. On next login, your workspace will be restored exactly as you left it.</p>
+            </div>
+
+            <!-- Leaderboard -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">🏆 LEADERBOARD</div>
+                <p>Compares all registered users by their latest portfolio total value. Shows 24h absolute and percentage change. Sorted descending by total value. Access via the trophy button in the header.</p>
+            </div>
+
+            <!-- News & Top Movers -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📰 NEWS & TOP MOVERS</div>
+                <p>• Latest financial news from Finnhub (refreshes every 2 minutes).<br>
+                • Top 5 gainers and losers from your watchlist are displayed in real time.</p>
+            </div>
         </div>
     </div>
 </div>

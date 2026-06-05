@@ -935,7 +935,7 @@ async function renderWatchlist() {
     showWatchlistSkeleton();
     const table = document.createElement('table');
     table.className = "w-full text-left text-xs font-mono";
-    table.innerHTML = `<thead><tr class="text-[#a0a0a0] text-[10px] border-b border-[#282828]/40"><th class="pb-1">★</th><th class="pb-1">SYMBOL / COMPANY</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th></tr></thead><tbody id="watchlist-tbody"></tbody>`;
+    table.innerHTML = `<thead><tr class="text-[#a0a0a0] text-[10px] border-b border-[#282828]/40"><th class="pb-1">★</th><th class="pb-1">SYMBOL / COMPANY</th><th class="pb-1 text-right">LAST</th><th class="pb-1 text-right">NET CHG</th><th class="pb-1 text-right">% CHG</th></td></thead><tbody id="watchlist-tbody"></tbody>`;
     const container = document.getElementById('watchlist-container');
     container.innerHTML = '';
     container.appendChild(table);
@@ -1186,7 +1186,9 @@ function toggleHelpModal() { document.getElementById('help-modal').classList.tog
 function updateClock() { document.getElementById('terminal-clock').innerText = new Date().toUTCString().replace('GMT', 'UTC'); }
 setInterval(updateClock, 1000); updateClock();
 
-// Resizable panes
+// ============================================================
+// RESIZABLE PANES (MOVED ABOVE initTerminal to fix the error)
+// ============================================================
 function initResizablePanes() {
     const leftPane = document.getElementById('left-pane');
     const centerPane = document.getElementById('center-pane');
@@ -1350,17 +1352,32 @@ async function loadLayoutFromBackend() {
 function reorderMobileLayout() {
     const isPortrait = window.innerHeight > window.innerWidth;
     const terminalWorkspace = document.getElementById('terminal-workspace');
+    const saveWsBtn = document.getElementById('save-workspace-btn');
+    const profileBtn = document.getElementById('profile-btn');
+
+    // Handle header buttons visibility
+    if (isPortrait && window.innerWidth <= 768) {
+        if (saveWsBtn) saveWsBtn.style.display = 'none';
+        if (profileBtn) profileBtn.style.display = 'inline-block';
+    } else {
+        if (saveWsBtn) saveWsBtn.style.display = 'inline-block';
+        if (profileBtn) profileBtn.style.display = 'inline-block'; // show both on desktop
+    }
+
     if (!terminalWorkspace) return;
+
     if (isPortrait && window.innerWidth <= 768) {
         const watchlist = document.querySelector('.watchlist-module');
         const chart = document.querySelector('.chart-module');
         const trade = document.querySelector('.trade-module');
+        const portfolioAssets = document.querySelector('.portfolio-assets-module');
         const strategy = document.querySelector('.strategy-module');
         const portfolioLineChart = document.getElementById('portfolio-history-container');
         const portfolioPieChart = document.getElementById('portfolio-composition-container');
         const correlation = document.querySelector('.correlation-module');
         const ai = document.querySelector('.ai-module');
         const news = document.querySelector('.news-module');
+
         let mobileContainer = document.getElementById('mobile-portrait-container');
         if (!mobileContainer) {
             mobileContainer = document.createElement('div');
@@ -1372,16 +1389,19 @@ function reorderMobileLayout() {
             const grid = document.getElementById('main-resizable-grid');
             grid.parentNode.insertBefore(mobileContainer, grid);
         }
-        // Append modules in desired order
+
+        // Append in correct order
         if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
         if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
         if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
+        if (portfolioAssets && portfolioAssets.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioAssets);
         if (strategy && strategy.parentNode !== mobileContainer) mobileContainer.appendChild(strategy);
         if (correlation && correlation.parentNode !== mobileContainer) mobileContainer.appendChild(correlation);
         if (portfolioLineChart && portfolioLineChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioLineChart);
         if (portfolioPieChart && portfolioPieChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioPieChart);
         if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
         if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
+
         const grid = document.getElementById('main-resizable-grid');
         if (grid) grid.style.display = 'none';
         if (mobileContainer) mobileContainer.style.display = 'flex';
@@ -1391,27 +1411,32 @@ function reorderMobileLayout() {
             const watchlist = document.querySelector('.watchlist-module');
             const chart = document.querySelector('.chart-module');
             const trade = document.querySelector('.trade-module');
+            const portfolioAssets = document.querySelector('.portfolio-assets-module');
             const strategy = document.querySelector('.strategy-module');
             const portfolioLineChart = document.getElementById('portfolio-history-container');
             const portfolioPieChart = document.getElementById('portfolio-composition-container');
             const correlation = document.querySelector('.correlation-module');
             const ai = document.querySelector('.ai-module');
             const news = document.querySelector('.news-module');
+
             const leftPane = document.getElementById('left-pane');
             const centerPane = document.getElementById('center-pane');
             const rightPane = document.getElementById('right-pane');
             const leftContent = leftPane?.querySelector('.pane-content');
             const centerContent = centerPane?.querySelector('.pane-content');
             const rightContent = rightPane?.querySelector('.pane-content');
+
             if (watchlist && leftContent && watchlist.parentNode !== leftContent) leftContent.insertBefore(watchlist, leftContent.firstChild);
             if (chart && centerContent) centerContent.insertBefore(chart, centerContent.firstChild);
             if (trade && leftContent) leftContent.appendChild(trade);
+            if (portfolioAssets && leftContent && portfolioAssets.parentNode !== leftContent) leftContent.insertBefore(portfolioAssets, strategy || null);
             if (strategy && leftContent && strategy.parentNode !== leftContent) leftContent.appendChild(strategy);
             if (correlation && rightContent && correlation.parentNode !== rightContent) rightContent.insertBefore(correlation, rightContent.firstChild);
             if (portfolioLineChart && rightContent && portfolioLineChart.parentNode !== rightContent) rightContent.insertBefore(portfolioLineChart, correlation ? correlation.nextSibling : rightContent.firstChild);
             if (portfolioPieChart && rightContent && portfolioPieChart.parentNode !== rightContent) rightContent.insertBefore(portfolioPieChart, portfolioLineChart?.nextSibling || rightContent.firstChild);
             if (ai && rightContent) rightContent.insertBefore(ai, portfolioPieChart?.nextSibling || rightContent.firstChild);
             if (news && rightContent) rightContent.appendChild(news);
+
             mobileContainer.remove();
         }
         const grid = document.getElementById('main-resizable-grid');
@@ -1420,94 +1445,136 @@ function reorderMobileLayout() {
 }
 
 // ============================================================
-// INITIALISE TERMINAL
+// PROFILE MODAL & ACCOUNT MANAGEMENT (MOVED BEFORE initTerminal)
 // ============================================================
-async function initTerminal() {
-    restorePanelSizes();
-    await loadLayoutFromBackend();  // Phase 4: load saved workspace
-    initChart();
-    await renderWatchlist();
-    await changeActiveSymbol('AAPL');
-    const holdingsSymbols = Object.keys(portfolio.holdings);
-    if (holdingsSymbols.length > 0) await Promise.all(holdingsSymbols.map(sym => loadQuote(sym)));
-    await savePortfolioValueSnapshot();
-    connectWebSocket();
-    setInterval(() => updatePortfolioDisplay(), 3000);
-    fetchNews();
-    setInterval(fetchNews, 120000);
-    setInterval(() => savePortfolioValueSnapshot(), 3600000);
-    document.getElementById('terminal-mode-badge').innerText = 'LIVE DATA';
-    document.getElementById('trade-history-btn').onclick = showTradeHistoryModal;
-    document.getElementById('leaderboard-btn')?.addEventListener('click', showLeaderboard);
-    document.getElementById('asset-filter')?.addEventListener('change', applyWatchlistFilters);
-    document.getElementById('refresh-quotes-btn')?.addEventListener('click', refreshAllQuotes);
-    document.getElementById('refresh-correlation')?.addEventListener('click', () => updateCorrelationMatrix());
-    setTimeout(() => updateCorrelationMatrix(), 5000);
-    setInterval(() => updateCorrelationMatrix(), 60000);
-    document.getElementById('portfolio-range-1w')?.addEventListener('click', () => setPortfolioHistoryRange('1W'));
-    document.getElementById('portfolio-range-1m')?.addEventListener('click', () => setPortfolioHistoryRange('1M'));
-document.getElementById('asset-search-input')?.addEventListener('input', updatePortfolioAssetsList);
-updatePortfolioAssetsList();
-    document.getElementById('portfolio-range-3m')?.addEventListener('click', () => setPortfolioHistoryRange('3M'));
-    document.getElementById('forecast-model')?.addEventListener('change', async () => {
-        if (currentCandles.length) {
-            try {
-                const forecastValues = await updateForecastPanel(currentCandles);
-                if (showForecast && forecastValues) {
-                    const lastCandle = currentCandles[currentCandles.length-1];
-                    const lastDate = new Date(lastCandle.time);
-                    const forecastData = [];
-                    for (let i = 1; i <= 5; i++) {
-                        const futureDate = new Date(lastDate);
-                        futureDate.setDate(lastDate.getDate() + i);
-                        forecastData.push({ time: futureDate.toISOString().split('T')[0], value: forecastValues[i-1] });
-                    }
-                    forecastSeries.setData(forecastData);
-                } else forecastSeries.setData([]);
-            } catch (err) { console.warn('Forecast model change error:', err); forecastSeries.setData([]); }
-        }
-    });
-    if (window.innerWidth >= 769) initResizablePanes();
-    window.addEventListener('resize', () => {
-        if (window.innerWidth >= 769 && !document.getElementById('handle1').hasListener) initResizablePanes();
-        refreshChartSize();
-        if (portfolioChart) setTimeout(() => updatePortfolioChart(), 100);
-        reorderMobileLayout(); // re-run layout on resize
-    });
-    enableHorizontalScroll();
-    document.getElementById('apply-filter')?.addEventListener('click', applyWatchlistFilters);
-    document.getElementById('favourite-filter')?.addEventListener('change', applyWatchlistFilters);
-    document.getElementById('search-input')?.addEventListener('input', applyWatchlistFilters);
-    
-    // Portfolio chart resize observer with debounce
-    const portfolioContainer = document.getElementById('portfolio-history-container');
-    let portfolioChartResizeTimeout;
-    if (portfolioContainer && window.ResizeObserver) {
-        new ResizeObserver(() => {
-            if (portfolioChartResizeTimeout) clearTimeout(portfolioChartResizeTimeout);
-            portfolioChartResizeTimeout = setTimeout(() => {
-                if (portfolioChart) portfolioChart.resize();
-            }, 100);
-        }).observe(portfolioContainer);
-    }
-    
-    reorderMobileLayout();
-    updatePortfolioComposition(0, true);
-    setTimeout(() => updatePortfolioComposition(0, true), 3000);
-    setTimeout(() => updatePortfolioComposition(0, true), 6000);
-    const tradeQtyInput = document.getElementById('trade-qty');
-    if (tradeQtyInput) tradeQtyInput.addEventListener('input', updateTotalPreview);
-    const tradeSymbolInput = document.getElementById('trade-symbol');
-    if (tradeSymbolInput) tradeSymbolInput.addEventListener('change', updateTotalPreview);
-    updateTotalPreview();
-    if (typeof initBacktester === 'function') initBacktester();
-    // Save workspace button
-    const saveWsBtn = document.getElementById('save-workspace-btn');
-    if (saveWsBtn) saveWsBtn.addEventListener('click', saveLayoutToBackend);
+function closeProfileModal() { document.getElementById('profile-modal').classList.add('hidden'); }
+window.closeProfileModal = closeProfileModal;
+async function showProfileModal() {
+    document.getElementById('profile-username').innerText = currentUser;
+    document.getElementById('profile-modal').classList.remove('hidden');
 }
+document.getElementById('profile-btn')?.addEventListener('click', showProfileModal);
+document.getElementById('change-username-btn')?.addEventListener('click', async () => {
+    const newUsername = document.getElementById('new-username').value.trim();
+    if (!newUsername) { alert('Please enter a new username'); return; }
+    try {
+        const res = await fetch('/api/user/change-username', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: JSON.stringify({ newUsername })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert('Username changed. Please log in again.');
+            document.getElementById('logout-btn').click();
+        } else {
+            alert(data.error || 'Failed to change username');
+        }
+    } catch (err) { alert('Error: ' + err.message); }
+});
+document.getElementById('change-password-btn')?.addEventListener('click', async () => {
+    const current = document.getElementById('current-password').value;
+    const newPwd = document.getElementById('new-password').value;
+    const confirm = document.getElementById('confirm-password').value;
+    if (!current || !newPwd) { alert('Please fill in all password fields'); return; }
+    if (newPwd !== confirm) { alert('New passwords do not match'); return; }
+    try {
+        const res = await fetch('/api/user/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: JSON.stringify({ currentPassword: current, newPassword: newPwd })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert('Password changed. Please log in again.');
+            document.getElementById('logout-btn').click();
+        } else {
+            alert(data.error || 'Failed to change password');
+        }
+    } catch (err) { alert('Error: ' + err.message); }
+});
+document.getElementById('delete-account-btn')?.addEventListener('click', async () => {
+    if (!confirm('WARNING: This will permanently delete your account and all data. Are you sure?')) return;
+    try {
+        const res = await fetch('/api/user/delete', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert('Account deleted. Goodbye.');
+            document.getElementById('logout-btn').click();
+        } else {
+            alert(data.error || 'Failed to delete account');
+        }
+    } catch (err) { alert('Error: ' + err.message); }
+});
 
 // ============================================================
-// LEADERBOARD & CORRELATION MATRIX (keep existing implementations)
+// PORTFOLIO ASSETS MODULE (with search)
+// ============================================================
+function updatePortfolioAssetsList() {
+    const container = document.getElementById('portfolio-assets-list');
+    if (!container) return;
+    const searchTerm = document.getElementById('asset-search-input')?.value.toLowerCase() || '';
+    const holdings = Object.entries(portfolio.holdings);
+    if (holdings.length === 0) {
+        container.innerHTML = '<div class="text-gray-500 text-center">No holdings yet. Buy some shares!</div>';
+        return;
+    }
+    let html = '';
+    for (const [sym, h] of holdings) {
+        if (searchTerm && !sym.toLowerCase().includes(searchTerm)) continue;
+        const price = priceCache[sym]?.price || 0;
+        const value = h.qty * price;
+        const dailyPnl = (price - (priceCache[sym]?.prevClose || price)) * h.qty;
+        html += `<div class="flex justify-between items-center border-b border-[#282828]/30 py-1 hover:bg-white/5 cursor-pointer" onclick="changeActiveSymbol('${sym}')">
+            <div><span class="font-bold text-bbAmber">${sym}</span><span class="text-[8px] text-gray-400 ml-1">${h.qty.toFixed(4)} shrs</span></div>
+            <div class="text-right">
+                <div class="${dailyPnl >= 0 ? 'text-green-500' : 'text-red-500'}">$${value.toFixed(2)}</div>
+                <div class="text-[8px] ${dailyPnl >= 0 ? 'text-green-500' : 'text-red-500'}">${dailyPnl >= 0 ? '+' : ''}$${dailyPnl.toFixed(2)}</div>
+            </div>
+        </div>`;
+    }
+    if (html === '') html = '<div class="text-gray-500 text-center">No matching assets</div>';
+    container.innerHTML = html;
+}
+
+function updateCompositionLegend() {
+    const legendContainer = document.getElementById('composition-legend');
+    if (!legendContainer || !compositionChart) return;
+    const labels = compositionChart.data.labels;
+    const colors = compositionChart.data.datasets[0].backgroundColor;
+    const data = compositionChart.data.datasets[0].data;
+    const total = data.reduce((a,b) => a + b, 0);
+    let html = '';
+    for (let i = 0; i < labels.length; i++) {
+        const percentage = ((data[i] / total) * 100).toFixed(1);
+        html += `<div class="flex items-center gap-2">
+            <div style="width: 10px; height: 10px; background-color: ${colors[i]}; border-radius: 2px;"></div>
+            <span class="font-mono">${labels[i]}</span>
+            <span class="ml-auto">${percentage}%</span>
+        </div>`;
+    }
+    legendContainer.innerHTML = html;
+}
+
+// Override updatePortfolioComposition to also update legend
+const originalUpdateComposition = updatePortfolioComposition;
+updatePortfolioComposition = function(retry, force) {
+    originalUpdateComposition(retry, force);
+    setTimeout(() => updateCompositionLegend(), 100);
+};
+
+// Also update portfolio assets list when portfolio changes
+const originalUpdateDisplay = window.updatePortfolioDisplay;
+window.updatePortfolioDisplay = function() {
+    originalUpdateDisplay();
+    updatePortfolioAssetsList();
+};
+
+// ============================================================
+// LEADERBOARD & CORRELATION MATRIX
 // ============================================================
 async function showLeaderboard() {
     const modal = document.getElementById('leaderboard-modal');
@@ -1524,7 +1591,7 @@ async function showLeaderboard() {
         data.leaderboard.forEach((user, idx) => {
             const changeClass = user.dayChange >= 0 ? 'text-green-500' : 'text-red-500';
             const changeSign = user.dayChange >= 0 ? '+' : '';
-            html += `<tr class="border-b border-gray-700 hover:bg-gray-800/30"><td class="py-2 px-3 align-middle">${idx + 1}<tr><td class="py-2 px-3 align-middle font-medium">${escapeHtml(user.username)}</td><td class="py-2 px-3 text-right font-mono align-middle">$${user.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td class="py-2 px-3 text-right font-mono ${changeClass} align-middle">${changeSign}$${user.dayChange.toFixed(2)} (${changeSign}${user.dayChangePct.toFixed(2)}%)</td></tr>`;
+            html += `<tr class="border-b border-gray-700 hover:bg-gray-800/30"><td class="py-2 px-3 align-middle">${idx + 1}</td><td class="py-2 px-3 align-middle font-medium">${escapeHtml(user.username)}</td><td class="py-2 px-3 text-right font-mono align-middle">$${user.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td class="py-2 px-3 text-right font-mono ${changeClass} align-middle">${changeSign}$${user.dayChange.toFixed(2)} (${changeSign}${user.dayChangePct.toFixed(2)}%)</td></tr>`;
         });
         html += '</tbody></table></div>';
         listContainer.innerHTML = html;
@@ -1577,15 +1644,14 @@ async function updateCorrelationMatrix() {
             for (let j = 0; j < n; j++) {
                 const corr = matrix[i][j];
                 // Pure red-green spectrum (no blue)
-const intensity = (corr + 1) / 2; // 0 = red, 1 = green
-const red = Math.floor(255 * (1 - intensity));
-const green = Math.floor(255 * intensity);
-const blue = 0; // Remove blue entirely
-const color = `rgb(${red}, ${green}, ${blue})`;
-// Choose text color for contrast: white on dark backgrounds, black on light backgrounds
-const brightness = (red * 0.299 + green * 0.587 + blue * 0.114);
-const textColor = brightness > 140 ? '#000000' : '#ffffff';
-html += `<td class="p-1 text-center" style="background-color: ${color}; color: ${textColor}">${corr.toFixed(2)}</td>`;
+                const intensity = (corr + 1) / 2;
+                const red = Math.floor(255 * (1 - intensity));
+                const green = Math.floor(255 * intensity);
+                const blue = 0;
+                const color = `rgb(${red}, ${green}, ${blue})`;
+                const brightness = (red * 0.299 + green * 0.587 + blue * 0.114);
+                const textColor = brightness > 140 ? '#000000' : '#ffffff';
+                html += `<td class="p-1 text-center" style="background-color: ${color}; color: ${textColor}">${corr.toFixed(2)}</td>`;
             }
             html += '</tr>';
         }
@@ -1595,138 +1661,93 @@ html += `<td class="p-1 text-center" style="background-color: ${color}; color: $
 }
 
 // ============================================================
-// PORTFOLIO ASSETS MODULE (with search)
+// INITIALISE TERMINAL (NOW ALL FUNCTIONS ARE DEFINED ABOVE)
 // ============================================================
-function updatePortfolioAssetsList() {
-    const container = document.getElementById('portfolio-assets-list');
-    if (!container) return;
-    const searchTerm = document.getElementById('asset-search-input')?.value.toLowerCase() || '';
-    const holdings = Object.entries(portfolio.holdings);
-    if (holdings.length === 0) {
-        container.innerHTML = '<div class="text-gray-500 text-center">No holdings yet. Buy some shares!</div>';
-        return;
-    }
-    let html = '';
-    for (const [sym, h] of holdings) {
-        if (searchTerm && !sym.toLowerCase().includes(searchTerm)) continue;
-        const price = priceCache[sym]?.price || 0;
-        const value = h.qty * price;
-        const dailyPnl = (price - (priceCache[sym]?.prevClose || price)) * h.qty;
-        html += `<div class="flex justify-between items-center border-b border-[#282828]/30 py-1 hover:bg-white/5 cursor-pointer" onclick="changeActiveSymbol('${sym}')">
-            <div><span class="font-bold text-bbAmber">${sym}</span><span class="text-[8px] text-gray-400 ml-1">${h.qty.toFixed(4)} shrs</span></div>
-            <div class="text-right">
-                <div class="${dailyPnl >= 0 ? 'text-green-500' : 'text-red-500'}">$${value.toFixed(2)}</div>
-                <div class="text-[8px] ${dailyPnl >= 0 ? 'text-green-500' : 'text-red-500'}">${dailyPnl >= 0 ? '+' : ''}$${dailyPnl.toFixed(2)}</div>
-            </div>
-        </div>`;
-    }
-    if (html === '') html = '<div class="text-gray-500 text-center">No matching assets</div>';
-    container.innerHTML = html;
-}
-
-// ============================================================
-// PROFILE MODAL & ACCOUNT MANAGEMENT
-// ============================================================
-async function showProfileModal() {
-    document.getElementById('profile-username').innerText = currentUser;
-    document.getElementById('profile-modal').classList.remove('hidden');
-}
-function closeProfileModal() {
-    document.getElementById('profile-modal').classList.add('hidden');
-}
-
-document.getElementById('profile-btn')?.addEventListener('click', showProfileModal);
-document.getElementById('change-username-btn')?.addEventListener('click', async () => {
-    const newUsername = document.getElementById('new-username').value.trim();
-    if (!newUsername) { alert('Please enter a new username'); return; }
-    try {
-        const res = await fetch('/api/user/change-username', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-            body: JSON.stringify({ newUsername })
-        });
-        const data = await res.json();
-        if (res.ok) {
-            alert('Username changed. Please log in again.');
-            document.getElementById('logout-btn').click();
-        } else {
-            alert(data.error || 'Failed to change username');
+async function initTerminal() {
+    restorePanelSizes();
+    await loadLayoutFromBackend();  // Phase 4: load saved workspace
+    initChart();
+    await renderWatchlist();
+    await changeActiveSymbol('AAPL');
+    const holdingsSymbols = Object.keys(portfolio.holdings);
+    if (holdingsSymbols.length > 0) await Promise.all(holdingsSymbols.map(sym => loadQuote(sym)));
+    await savePortfolioValueSnapshot();
+    connectWebSocket();
+    setInterval(() => updatePortfolioDisplay(), 3000);
+    fetchNews();
+    setInterval(fetchNews, 120000);
+    setInterval(() => savePortfolioValueSnapshot(), 3600000);
+    document.getElementById('terminal-mode-badge').innerText = 'LIVE DATA';
+    document.getElementById('trade-history-btn').onclick = showTradeHistoryModal;
+    document.getElementById('leaderboard-btn')?.addEventListener('click', showLeaderboard);
+    document.getElementById('asset-filter')?.addEventListener('change', applyWatchlistFilters);
+    document.getElementById('refresh-quotes-btn')?.addEventListener('click', refreshAllQuotes);
+    document.getElementById('refresh-correlation')?.addEventListener('click', () => updateCorrelationMatrix());
+    setTimeout(() => updateCorrelationMatrix(), 5000);
+    setInterval(() => updateCorrelationMatrix(), 60000);
+    document.getElementById('portfolio-range-1w')?.addEventListener('click', () => setPortfolioHistoryRange('1W'));
+    document.getElementById('portfolio-range-1m')?.addEventListener('click', () => setPortfolioHistoryRange('1M'));
+    document.getElementById('portfolio-range-3m')?.addEventListener('click', () => setPortfolioHistoryRange('3M'));
+    document.getElementById('forecast-model')?.addEventListener('change', async () => {
+        if (currentCandles.length) {
+            try {
+                const forecastValues = await updateForecastPanel(currentCandles);
+                if (showForecast && forecastValues) {
+                    const lastCandle = currentCandles[currentCandles.length-1];
+                    const lastDate = new Date(lastCandle.time);
+                    const forecastData = [];
+                    for (let i = 1; i <= 5; i++) {
+                        const futureDate = new Date(lastDate);
+                        futureDate.setDate(lastDate.getDate() + i);
+                        forecastData.push({ time: futureDate.toISOString().split('T')[0], value: forecastValues[i-1] });
+                    }
+                    forecastSeries.setData(forecastData);
+                } else forecastSeries.setData([]);
+            } catch (err) { console.warn('Forecast model change error:', err); forecastSeries.setData([]); }
         }
-    } catch (err) { alert('Error: ' + err.message); }
-});
-
-document.getElementById('change-password-btn')?.addEventListener('click', async () => {
-    const current = document.getElementById('current-password').value;
-    const newPwd = document.getElementById('new-password').value;
-    const confirm = document.getElementById('confirm-password').value;
-    if (!current || !newPwd) { alert('Please fill in all password fields'); return; }
-    if (newPwd !== confirm) { alert('New passwords do not match'); return; }
-    try {
-        const res = await fetch('/api/user/change-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-            body: JSON.stringify({ currentPassword: current, newPassword: newPwd })
-        });
-        const data = await res.json();
-        if (res.ok) {
-            alert('Password changed. Please log in again.');
-            document.getElementById('logout-btn').click();
-        } else {
-            alert(data.error || 'Failed to change password');
-        }
-    } catch (err) { alert('Error: ' + err.message); }
-});
-
-document.getElementById('delete-account-btn')?.addEventListener('click', async () => {
-    if (!confirm('WARNING: This will permanently delete your account and all data. Are you sure?')) return;
-    try {
-        const res = await fetch('/api/user/delete', {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${authToken}` }
-        });
-        const data = await res.json();
-        if (res.ok) {
-            alert('Account deleted. Goodbye.');
-            document.getElementById('logout-btn').click();
-        } else {
-            alert(data.error || 'Failed to delete account');
-        }
-    } catch (err) { alert('Error: ' + err.message); }
-});
-
-// Update portfolio composition legend
-function updateCompositionLegend() {
-    const legendContainer = document.getElementById('composition-legend');
-    if (!legendContainer || !compositionChart) return;
-    const labels = compositionChart.data.labels;
-    const colors = compositionChart.data.datasets[0].backgroundColor;
-    const data = compositionChart.data.datasets[0].data;
-    const total = data.reduce((a,b) => a + b, 0);
-    let html = '';
-    for (let i = 0; i < labels.length; i++) {
-        const percentage = ((data[i] / total) * 100).toFixed(1);
-        html += `<div class="flex items-center gap-2">
-            <div style="width: 10px; height: 10px; background-color: ${colors[i]}; border-radius: 2px;"></div>
-            <span class="font-mono">${labels[i]}</span>
-            <span class="ml-auto">${percentage}%</span>
-        </div>`;
+    });
+    if (window.innerWidth >= 769) initResizablePanes();
+    window.addEventListener('resize', () => {
+        if (window.innerWidth >= 769 && !document.getElementById('handle1').hasListener) initResizablePanes();
+        refreshChartSize();
+        if (portfolioChart) setTimeout(() => updatePortfolioChart(), 100);
+        reorderMobileLayout(); // re-run layout on resize
+    });
+    enableHorizontalScroll();
+    document.getElementById('apply-filter')?.addEventListener('click', applyWatchlistFilters);
+    document.getElementById('favourite-filter')?.addEventListener('change', applyWatchlistFilters);
+    document.getElementById('search-input')?.addEventListener('input', applyWatchlistFilters);
+    
+    // Portfolio chart resize observer with debounce
+    const portfolioContainer = document.getElementById('portfolio-history-container');
+    let portfolioChartResizeTimeout;
+    if (portfolioContainer && window.ResizeObserver) {
+        new ResizeObserver(() => {
+            if (portfolioChartResizeTimeout) clearTimeout(portfolioChartResizeTimeout);
+            portfolioChartResizeTimeout = setTimeout(() => {
+                if (portfolioChart) portfolioChart.resize();
+            }, 100);
+        }).observe(portfolioContainer);
     }
-    legendContainer.innerHTML = html;
-}
-
-// Override updatePortfolioComposition to also update legend
-const originalUpdateComposition = updatePortfolioComposition;
-updatePortfolioComposition = function(retry, force) {
-    originalUpdateComposition(retry, force);
-    setTimeout(() => updateCompositionLegend(), 100);
-};
-
-// Also update portfolio assets list when portfolio changes
-const originalUpdateDisplay = window.updatePortfolioDisplay;
-window.updatePortfolioDisplay = function() {
-    originalUpdateDisplay();
+    
+    // Asset search input
+    document.getElementById('asset-search-input')?.addEventListener('input', updatePortfolioAssetsList);
     updatePortfolioAssetsList();
-};
+    
+    reorderMobileLayout();
+    updatePortfolioComposition(0, true);
+    setTimeout(() => updatePortfolioComposition(0, true), 3000);
+    setTimeout(() => updatePortfolioComposition(0, true), 6000);
+    const tradeQtyInput = document.getElementById('trade-qty');
+    if (tradeQtyInput) tradeQtyInput.addEventListener('input', updateTotalPreview);
+    const tradeSymbolInput = document.getElementById('trade-symbol');
+    if (tradeSymbolInput) tradeSymbolInput.addEventListener('change', updateTotalPreview);
+    updateTotalPreview();
+    if (typeof initBacktester === 'function') initBacktester();
+    // Save workspace button
+    const saveWsBtn = document.getElementById('save-workspace-btn');
+    if (saveWsBtn) saveWsBtn.addEventListener('click', saveLayoutToBackend);
+}
 
 // Expose necessary functions globally
 window.changeActiveSymbol = changeActiveSymbol;
