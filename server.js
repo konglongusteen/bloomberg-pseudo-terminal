@@ -91,14 +91,16 @@ app.post('/api/auth/register', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
 
+    const normalizedUsername = username.toLowerCase();   // ✅ convert to lowercase
+
     const users = await getUsers();
-    if (users.find(u => u.username === username)) {
+    if (users.find(u => u.username === normalizedUsername)) {
         return res.status(400).json({ error: 'User exists' });
     }
 
     const hashed = await bcrypt.hash(password, 10);
     const newUser = {
-        username,
+        username: normalizedUsername,                  // ✅ stored lowercase
         password: hashed,
         portfolio: { cash: 100000, holdings: {} },
         createdAt: new Date(),
@@ -108,7 +110,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (!saved) return res.status(500).json({ error: 'Registration failed' });
 
     const today = new Date().toISOString().split('T')[0];
-    await savePortfolioHistory(username, today, 100000);
+    await savePortfolioHistory(normalizedUsername, today, 100000);   // ✅ use lowercase
 
     res.json({ message: 'Registered' });
 });
