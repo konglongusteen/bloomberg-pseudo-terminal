@@ -1441,20 +1441,12 @@ function reorderMobileLayout() {
         if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
         if (portfolioAssets && portfolioAssets.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioAssets);
         if (strategy && strategy.parentNode !== mobileContainer) mobileContainer.appendChild(strategy);
+if (conditionalOrders && conditionalOrders.parentNode !== mobileContainer) mobileContainer.appendChild(conditionalOrders);
         if (correlation && correlation.parentNode !== mobileContainer) mobileContainer.appendChild(correlation);
         if (portfolioLineChart && portfolioLineChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioLineChart);
         if (portfolioPieChart && portfolioPieChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioPieChart);
         if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
         if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
-
-if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appendChild(watchlist);
-    if (chart && chart.parentNode !== mobileContainer) mobileContainer.appendChild(chart);
-    if (trade && trade.parentNode !== mobileContainer) mobileContainer.appendChild(trade);
-    if (portfolioAssets && portfolioAssets.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioAssets);
-    if (strategy && strategy.parentNode !== mobileContainer) mobileContainer.appendChild(strategy);
-    if (conditionalOrders && conditionalOrders.parentNode !== mobileContainer) mobileContainer.appendChild(conditionalOrders); // ← ADD
-    if (correlation && correlation.parentNode !== mobileContainer) mobileContainer.appendChild(correlation);
-
         const grid = document.getElementById('main-resizable-grid');
         if (grid) grid.style.display = 'none';
         if (mobileContainer) mobileContainer.style.display = 'flex';
@@ -1466,6 +1458,7 @@ if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appen
             const trade = document.querySelector('.trade-module');
             const portfolioAssets = document.querySelector('.portfolio-assets-module');
             const strategy = document.querySelector('.strategy-module');
+	    const conditionalOrders = document.querySelector('.conditional-orders-module');
             const portfolioLineChart = document.getElementById('portfolio-history-container');
             const portfolioPieChart = document.getElementById('portfolio-composition-container');
             const correlation = document.querySelector('.correlation-module');
@@ -1489,6 +1482,7 @@ if (watchlist && watchlist.parentNode !== mobileContainer) mobileContainer.appen
             if (portfolioPieChart && rightContent && portfolioPieChart.parentNode !== rightContent) rightContent.insertBefore(portfolioPieChart, portfolioLineChart?.nextSibling || rightContent.firstChild);
             if (ai && rightContent) rightContent.insertBefore(ai, portfolioPieChart?.nextSibling || rightContent.firstChild);
             if (news && rightContent) rightContent.appendChild(news);
+	    if (conditionalOrders && leftContent && conditionalOrders.parentNode !== leftContent) leftContent.appendChild(conditionalOrders);
 
             mobileContainer.remove();
         }
@@ -1741,26 +1735,23 @@ async function updateTwoFAStatusUI() {
 document.getElementById('enable-2fa-btn')?.addEventListener('click', async () => {
     try {
         const res = await fetch('/api/auth/enable-2fa', {
-            method: 'POST',                           // ✅ MUST be POST
+            method: 'POST',                           // ✅ changed from GET to POST
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json',   // ✅ added
                 'Authorization': `Bearer ${authToken}`
             }
         });
         if (!res.ok) {
-            const errorText = await res.text();
+            const errorText = await res.text();       // ✅ read HTML error if any
             throw new Error(`Server error ${res.status}: ${errorText}`);
         }
         const data = await res.json();
-        // process QR code and secret
         current2FASecret = data.secret;
         const qrContainer = document.getElementById('qr-code-container');
         qrContainer.innerHTML = `<img src="${data.qrCode}" alt="QR Code" class="mx-auto w-32 h-32">`;
         document.getElementById('twofa-setup-area').classList.remove('hidden');
         document.getElementById('enable-2fa-btn').classList.add('hidden');
-    } catch(err) {
-        alert('Failed to enable 2FA: ' + err.message);
-    }
+    } catch(err) { alert('Failed to enable 2FA: ' + err.message); }
 });
 document.getElementById('verify-2fa-btn')?.addEventListener('click', async () => {
     const token = document.getElementById('otp-token').value.trim();
