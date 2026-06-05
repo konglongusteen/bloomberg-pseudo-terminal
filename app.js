@@ -1446,6 +1446,8 @@ async function initTerminal() {
     setInterval(() => updateCorrelationMatrix(), 60000);
     document.getElementById('portfolio-range-1w')?.addEventListener('click', () => setPortfolioHistoryRange('1W'));
     document.getElementById('portfolio-range-1m')?.addEventListener('click', () => setPortfolioHistoryRange('1M'));
+document.getElementById('asset-search-input')?.addEventListener('input', updatePortfolioAssetsList);
+updatePortfolioAssetsList();
     document.getElementById('portfolio-range-3m')?.addEventListener('click', () => setPortfolioHistoryRange('3M'));
     document.getElementById('forecast-model')?.addEventListener('change', async () => {
         if (currentCandles.length) {
@@ -1591,6 +1593,140 @@ html += `<td class="p-1 text-center" style="background-color: ${color}; color: $
         container.innerHTML = html;
     } catch (err) { console.error('Correlation error:', err); container.innerHTML = '<div class="text-red-500 text-[10px]">Failed to compute correlations</div>'; }
 }
+
+// ============================================================
+// PORTFOLIO ASSETS MODULE (with search)
+// ============================================================
+function updatePortfolioAssetsList() {
+    const container = document.getElementById('portfolio-assets-list');
+    if (!container) return;
+    const searchTerm = document.getElementById('asset-search-input')?.value.toLowerCase() || '';
+    const holdings = Object.entries(portfolio.holdings);
+    if (holdings.length === 0) {
+        container.innerHTML = '<div class="text-gray-500 text-center">No holdings yet. Buy some shares!</div>';
+        return;
+    }
+    let html = '';
+    for (const [sym, h] of holdings) {
+        if (searchTerm && !sym.toLowerCase().includes(searchTerm)) continue;
+        const price = priceCache[sym]?.price || 0;
+        const value = h.qty * price;
+        const dailyPnl = (price - (priceCache[sym]?.prevClose || price)) * h.qty;
+        html += `<div class="flex justify-between items-center border-b border-[#282828]/30 py-1 hover:bg-white/5 cursor-pointer" onclick="changeActiveSymbol('${sym}')">
+            <div><span class="font-bold text-bbAmber">${sym}</span><span class="text-[8px] text-gray-400 ml-1">${h.qty.toFixed(4)} shrs</span></div>
+            <div class="text-right">
+                <div class="${dailyPnl >= 0 ? 'text-green-500' : 'text-red-500'}">$${value.toFixed(2)}</div>
+                <div class="text-[8px] ${dailyPnl >= 0 ? 'text-green-500' : 'text-red-500'}">${dailyPnl >= 0 ? '+' : ''}$${dailyPnl.toFixed(2)}</div>
+            </div>
+        </div>`;
+    }
+    if (html === '') html = '<div class="text-gray-500 text-center">No matching assets</div>';
+    container.innerHTML = html;
+}
+
+// ============================================================
+// PROFILE MODAL & ACCOUNT MANAGEMENT
+// ============================================================
+async function showProfileModal() {
+    document.getElementById('profile-username').innerText = currentUser;
+    document.getElementById('profile-modal').classList.remove('hidden');
+}
+function closeProfileModal() {
+    document.getElementById('profile-modal').classList.add('hidden');
+}
+
+document.getElementById('profile-btn')?.addEventListener('click', showProfileModal);
+document.getElementById('change-username-btn')?.addEventListener('click', async () => {
+    const newUsername = document.getElementById('new-username').value.trim();
+    if (!newUsername) { alert('Please enter a new username'); return; }
+    try {
+        const res = await fetch('/api/user/change-username', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: JSON.stringify({ newUsername })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert('Username changed. Please log in again.');
+            document.getElementById('logout-btn').click();
+        } else {
+            alert(data.error || 'Failed to change username');
+        }
+    } catch (err) { alert('Error: ' + err.message); }
+});
+
+document.getElementById('change-password-btn')?.addEventListener('click', async () => {
+    const current = document.getElementById('current-password').value;
+    const newPwd = document.getElementById('new-password').value;
+    const confirm = document.getElementById('confirm-password').value;
+    if (!current || !newPwd) { alert('Please fill in all password fields'); return; }
+    if (newPwd !== confirm) { alert('New passwords do not match'); return; }
+    try {
+        const res = await fetch('/api/user/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: JSON.stringify({ currentPassword: current, newPassword: newPwd })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert('Password changed. Please log in again.');
+            document.getElementById('logout-btn').click();
+        } else {
+            alert(data.error || 'Failed to change password');
+        }
+    } catch (err) { alert('Error: ' + err.message); }
+});
+
+document.getElementById('delete-account-btn')?.addEventListener('click', async () => {
+    if (!confirm('WARNING: This will permanently delete your account and all data. Are you sure?')) return;
+    try {
+        const res = await fetch('/api/user/delete', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert('Account deleted. Goodbye.');
+            document.getElementById('logout-btn').click();
+        } else {
+            alert(data.error || 'Failed to delete account');
+        }
+    } catch (err) { alert('Error: ' + err.message); }
+});
+
+// Update portfolio composition legend
+function updateCompositionLegend() {
+    const legendContainer = document.getElementById('composition-legend');
+    if (!legendContainer || !compositionChart) return;
+    const labels = compositionChart.data.labels;
+    const colors = compositionChart.data.datasets[0].backgroundColor;
+    const data = compositionChart.data.datasets[0].data;
+    const total = data.reduce((a,b) => a + b, 0);
+    let html = '';
+    for (let i = 0; i < labels.length; i++) {
+        const percentage = ((data[i] / total) * 100).toFixed(1);
+        html += `<div class="flex items-center gap-2">
+            <div style="width: 10px; height: 10px; background-color: ${colors[i]}; border-radius: 2px;"></div>
+            <span class="font-mono">${labels[i]}</span>
+            <span class="ml-auto">${percentage}%</span>
+        </div>`;
+    }
+    legendContainer.innerHTML = html;
+}
+
+// Override updatePortfolioComposition to also update legend
+const originalUpdateComposition = updatePortfolioComposition;
+updatePortfolioComposition = function(retry, force) {
+    originalUpdateComposition(retry, force);
+    setTimeout(() => updateCompositionLegend(), 100);
+};
+
+// Also update portfolio assets list when portfolio changes
+const originalUpdateDisplay = window.updatePortfolioDisplay;
+window.updatePortfolioDisplay = function() {
+    originalUpdateDisplay();
+    updatePortfolioAssetsList();
+};
 
 // Expose necessary functions globally
 window.changeActiveSymbol = changeActiveSymbol;

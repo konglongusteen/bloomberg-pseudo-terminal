@@ -580,3 +580,54 @@ setInterval(async () => {
         clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
     }
 }, 5000);
+
+// ---------- Profile Management ----------
+app.post('/api/user/change-username', authenticate, async (req, res) => {
+    const { newUsername } = req.body;
+    if (!newUsername) return res.status(400).json({ error: 'New username required' });
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    // Check if username already taken
+    const existing = await db.collection('users').findOne({ username: newUsername });
+    if (existing) return res.status(400).json({ error: 'Username already taken' });
+    // Update user
+    await db.collection('users').updateOne(
+        { username: req.user.username },
+        { $set: { username: newUsername } }
+    );
+    // Update all collections that reference username
+    await db.collection('trade_history').updateMany(
+        { username: req.user.username },
+        { $set: { username: newUsername } }
+    );
+    await db.collection('portfolio_history').updateMany(
+        { username: req.user.username },
+        { $set: { username: newUsername } }
+    );
+    res.json({ success: true });
+});
+
+app.post('/api/user/change-password', authenticate, async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Missing fields' });
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    const user = await db.collection('users').findOne({ username: req.user.username });
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await db.collection('users').updateOne(
+        { username: req.user.username },
+        { $set: { password: hashed } }
+    );
+    res.json({ success: true });
+});
+
+app.delete('/api/user/delete', authenticate, async (req, res) => {
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    await db.collection('users').deleteOne({ username: req.user.username });
+    await db.collection('trade_history').deleteMany({ username: req.user.username });
+    await db.collection('portfolio_history').deleteMany({ username: req.user.username });
+    res.json({ success: true });
+});

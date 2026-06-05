@@ -483,3 +483,18 @@ body.light-theme .history-table .text-green-500 {
 body.light-theme .history-table .text-red-500 {
     color: #ef4444 !important;
 }
+
+/* Portfolio composition legend in landscape */
+@media (min-width: 1024px) {
+    #composition-flex-container {
+        flex-direction: row !important;
+    }
+    #composition-legend {
+        max-height: 140px;
+        overflow-y: auto;
+    }
+}
+/* Profile modal light mode */
+body.light-theme #profile-modal .bg-black {
+    background-color: #f9fafb !important;
+}
