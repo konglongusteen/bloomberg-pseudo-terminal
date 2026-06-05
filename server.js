@@ -6,8 +6,21 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const WebSocket = require('ws');
 const cron = require('node-cron');
-const crypto = require('crypto'); // PHASE 4: for hash computation
-const { connectDb, getUsers, saveUser, updateUserPortfolio, getTradeHistory, saveTradeHistory, getPortfolioHistory, savePortfolioHistory } = require('./database');
+const crypto = require('crypto');
+
+// Redis optional
+let createClient = null;
+if (process.env.REDIS_URL) {
+    try {
+        createClient = require('redis').createClient;
+    } catch (e) {
+        console.warn('Redis package not installed – caching disabled');
+    }
+}
+
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
+const { connectDb, getUsers, saveUser, updateUserPortfolio, updateUserTwoFactor, getUserByUsername, getTradeHistory, saveTradeHistory, getPortfolioHistory, savePortfolioHistory, saveConditionalOrder, getActiveConditionalOrders, updateConditionalOrderStatus, deleteConditionalOrder } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,25 +28,63 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-// Yahoo API headers
-const yahooHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'application/json'
-};
+// Redis client (optional)
+let redisClient = null;
+(async () => {
+    if (process.env.REDIS_URL && createClient) {
+        redisClient = createClient({ url: process.env.REDIS_URL });
+        redisClient.on('error', err => console.warn('Redis error:', err));
+        await redisClient.connect();
+        console.log('✅ Redis connected');
+    } else if (process.env.REDIS_URL && !createClient) {
+        console.warn('Redis package not installed – please run `npm install redis` or remove REDIS_URL from .env');
+    }
+})();
 
+async function getCache(key) {
+    if (!redisClient) return null;
+    try {
+        const data = await redisClient.get(key);
+        return data ? JSON.parse(data) : null;
+    } catch (e) { return null; }
+}
+async function setCache(key, value, ttlSeconds = 3600) {
+    if (!redisClient) return;
+    try {
+        await redisClient.setEx(key, ttlSeconds, JSON.stringify(value));
+    } catch (e) {}
+}
+
+// Yahoo helpers
 function toYahooSymbol(symbol) {
     if (symbol.startsWith('^')) return symbol;
     if (symbol === '000300.SS') return symbol;
     return symbol.replace(/\./g, '-');
 }
+const yahooHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json'
+};
 
+// ========== MIDDLEWARE ==========
 app.use(cors());
 app.use(express.json());
-app.use(express.static(__dirname));
-app.get('/', (req, res) => res.sendFile(__dirname + '/index.html'));
-app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// ---------- Auth Routes (MongoDB) ----------
+// ========== AUTHENTICATION MIDDLEWARE ==========
+function authenticate(req, res, next) {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    try {
+        req.user = jwt.verify(auth.slice(7), JWT_SECRET);
+        next();
+    } catch {
+        res.status(401).json({ error: 'Invalid token' });
+    }
+}
+
+// ========== AUTH ROUTES (no authentication required) ==========
 app.post('/api/auth/register', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
@@ -48,7 +99,8 @@ app.post('/api/auth/register', async (req, res) => {
         username,
         password: hashed,
         portfolio: { cash: 100000, holdings: {} },
-        createdAt: new Date()
+        createdAt: new Date(),
+        twoFactor: { enabled: false, secret: null, recoveryCodes: [] }
     };
     const saved = await saveUser(newUser);
     if (!saved) return res.status(500).json({ error: 'Registration failed' });
@@ -60,38 +112,86 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-    const { username, password } = req.body;
-    const users = await getUsers();
-    const user = users.find(u => u.username === username);
+    const { username, password, otp } = req.body;
+    const user = await getUserByUsername(username);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
+    if (user.twoFactor?.enabled) {
+        if (!otp) return res.status(401).json({ error: '2FA code required' });
+        const verified = speakeasy.totp.verify({
+            secret: user.twoFactor.secret,
+            encoding: 'base32',
+            token: otp
+        });
+        if (!verified) return res.status(401).json({ error: 'Invalid 2FA code' });
+    }
+
     const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '24h' });
     res.json({
         token,
         username,
-        portfolio: user.portfolio || { cash: 100000, holdings: {} }
+        portfolio: user.portfolio || { cash: 100000, holdings: {} },
+        twoFactorEnabled: user.twoFactor?.enabled || false
     });
 });
 
-function authenticate(req, res, next) {
-    const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
+// ========== 2FA ENDPOINTS (require authentication) ==========
+app.post('/api/auth/enable-2fa', authenticate, async (req, res) => {
     try {
-        req.user = jwt.verify(auth.slice(7), JWT_SECRET);
-        next();
-    } catch {
-        res.status(401).json({ error: 'Invalid token' });
+        const user = await getUserByUsername(req.user.username);
+        if (user.twoFactor?.enabled) {
+            return res.status(400).json({ error: '2FA already enabled' });
+        }
+        const secret = speakeasy.generateSecret({ length: 20, name: `FinancialTerminal:${req.user.username}` });
+        const qrCode = await QRCode.toDataURL(secret.otpauth_url);
+        await updateUserTwoFactor(req.user.username, secret.base32, false, []);
+        res.json({ secret: secret.base32, qrCode });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
     }
-}
+});
 
+app.post('/api/auth/verify-2fa', authenticate, async (req, res) => {
+    try {
+        const { token } = req.body;
+        const user = await getUserByUsername(req.user.username);
+        if (!user.twoFactor?.secret) return res.status(400).json({ error: '2FA not initialized' });
+        const verified = speakeasy.totp.verify({ secret: user.twoFactor.secret, encoding: 'base32', token });
+        if (!verified) return res.status(401).json({ error: 'Invalid code' });
+        const recoveryCodes = Array.from({ length: 10 }, () => crypto.randomBytes(4).toString('hex'));
+        await updateUserTwoFactor(req.user.username, user.twoFactor.secret, true, recoveryCodes);
+        res.json({ success: true, recoveryCodes });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Verification failed' });
+    }
+});
+
+app.post('/api/auth/disable-2fa', authenticate, async (req, res) => {
+    try {
+        await updateUserTwoFactor(req.user.username, null, false, []);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Disable failed' });
+    }
+});
+
+app.get('/api/auth/check-2fa', authenticate, async (req, res) => {
+    try {
+        const user = await getUserByUsername(req.user.username);
+        res.json({ enabled: user?.twoFactor?.enabled || false });
+    } catch (err) {
+        res.status(500).json({ error: 'Check failed' });
+    }
+});
+
+// ========== PORTFOLIO ROUTES ==========
 app.get('/api/portfolio', authenticate, async (req, res) => {
-    const users = await getUsers();
-    const user = users.find(u => u.username === req.user.username);
+    const user = await getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ portfolio: user.portfolio || { cash: 100000, holdings: {} } });
 });
@@ -102,58 +202,136 @@ app.post('/api/portfolio/sync', authenticate, async (req, res) => {
     else res.status(500).json({ error: 'Sync failed' });
 });
 
-// ---------- Trade History with Cryptographic Hashing (Phase 4) ----------
-// Helper: compute SHA-256 hash
-function computeTradeHash(username, trade) {
-    const { id, timestamp, symbol, action, qty, price, pnl, prevHash = '' } = trade;
-    const data = `${username}|${timestamp}|${symbol}|${action}|${qty}|${price}|${pnl || ''}|${prevHash}`;
-    return crypto.createHash('sha256').update(data).digest('hex');
-}
+// ========== CONDITIONAL ORDERS ==========
+app.post('/api/orders/conditional', authenticate, async (req, res) => {
+    const { symbol, type, triggerPrice, quantity, trailingPercent } = req.body;
+    if (!symbol || !type || !triggerPrice || !quantity) {
+        return res.status(400).json({ error: 'Missing fields' });
+    }
+    const order = {
+        id: Date.now(),
+        username: req.user.username,
+        symbol: symbol.toUpperCase(),
+        type,
+        triggerPrice: parseFloat(triggerPrice),
+        quantity: parseFloat(quantity),
+        trailingPercent: trailingPercent ? parseFloat(trailingPercent) : null,
+        status: 'active',
+        createdAt: new Date(),
+        highestPriceSinceActivation: null
+    };
+    const saved = await saveConditionalOrder(order);
+    if (saved) res.json({ success: true, orderId: order.id });
+    else res.status(500).json({ error: 'Failed to save order' });
+});
 
-// Override saveTradeHistory to include hash chain
-async function saveTradeHistoryWithHash(username, trades) {
-    const database = await connectDb();
-    if (!database) return false;
+app.get('/api/orders/conditional', authenticate, async (req, res) => {
+    const orders = await getActiveConditionalOrders(req.user.username);
+    res.json({ orders });
+});
+
+app.delete('/api/orders/conditional/:id', authenticate, async (req, res) => {
+    const orderId = parseInt(req.params.id);
+    const ok = await deleteConditionalOrder(orderId);
+    res.json({ success: ok });
+});
+
+// ---------- Background Order Checker ----------
+setInterval(async () => {
     try {
-        // Get previous trade's hash
-        const lastTrade = await database.collection('trade_history')
-            .find({ username: username.toLowerCase() })
-            .sort({ timestamp: -1 })
-            .limit(1)
-            .toArray();
-        let prevHash = lastTrade.length ? lastTrade[0].hash : '0';
+        const db = await connectDb();
+        if (!db) return;
+        const activeOrders = await db.collection('conditional_orders').find({ status: 'active' }).toArray();
+        if (activeOrders.length === 0) return;
 
-        for (const trade of trades) {
-            const tradeWithPrev = { ...trade, prevHash };
-            const hash = computeTradeHash(username, tradeWithPrev);
-            tradeWithPrev.hash = hash;
-            delete tradeWithPrev.prevHash; // we store hash and prevHash separately
-            tradeWithPrev.prevHash = prevHash;
-            tradeWithPrev.hash = hash;
-
-            await database.collection('trade_history').updateOne(
-                { id: trade.id, username: username.toLowerCase() },
-                { $set: { ...tradeWithPrev, username: username.toLowerCase() } },
-                { upsert: true }
-            );
-            prevHash = hash;
+        const symbols = [...new Set(activeOrders.map(o => o.symbol))];
+        const prices = {};
+        for (const sym of symbols) {
+            const cached = await getCache(`quote:${sym}`);
+            if (cached && cached.price) prices[sym] = cached.price;
+            else {
+                try {
+                    const yahooSym = toYahooSymbol(sym);
+                    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
+                    const resp = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders, timeout: 5000 });
+                    const lastClose = resp.data.chart.result[0]?.indicators.quote[0]?.close.slice(-1)[0];
+                    if (lastClose) prices[sym] = lastClose;
+                } catch (e) { console.warn(`Order checker: cannot get price for ${sym}`); }
+            }
         }
-        return true;
-    } catch (err) { return false; }
-}
 
+        for (const order of activeOrders) {
+            const currentPrice = prices[order.symbol];
+            if (!currentPrice) continue;
+
+            let triggered = false;
+            let executedPrice = currentPrice;
+
+            if (order.type === 'stop_loss') {
+                if (currentPrice <= order.triggerPrice) triggered = true;
+            } else if (order.type === 'take_profit') {
+                if (currentPrice >= order.triggerPrice) triggered = true;
+            } else if (order.type === 'trailing_stop') {
+                let highest = order.highestPriceSinceActivation || currentPrice;
+                if (currentPrice > highest) highest = currentPrice;
+                const trailTrigger = highest * (1 - order.trailingPercent / 100);
+                if (currentPrice <= trailTrigger) triggered = true;
+                if (!triggered) {
+                    await db.collection('conditional_orders').updateOne(
+                        { id: order.id },
+                        { $set: { highestPriceSinceActivation: highest } }
+                    );
+                }
+            }
+
+            if (triggered) {
+                const user = await db.collection('users').findOne({ username: order.username });
+                if (!user) continue;
+                const portfolio = user.portfolio || { cash: 100000, holdings: {} };
+                const holding = portfolio.holdings[order.symbol];
+                if (!holding || holding.qty < order.quantity) {
+                    await updateConditionalOrderStatus(order.id, 'cancelled_insufficient');
+                    continue;
+                }
+                const total = executedPrice * order.quantity;
+                const pnl = (executedPrice - holding.avgPrice) * order.quantity;
+                portfolio.cash += total;
+                holding.qty -= order.quantity;
+                if (holding.qty === 0) delete portfolio.holdings[order.symbol];
+                await db.collection('users').updateOne(
+                    { username: order.username },
+                    { $set: { portfolio } }
+                );
+                const tradeRecord = {
+                    id: Date.now(),
+                    timestamp: new Date().toISOString(),
+                    symbol: order.symbol,
+                    action: 'SELL',
+                    qty: order.quantity,
+                    price: executedPrice,
+                    pnl,
+                    triggeredBy: order.type
+                };
+                await db.collection('trade_history').insertOne({ ...tradeRecord, username: order.username });
+                await updateConditionalOrderStatus(order.id, 'executed', executedPrice);
+                console.log(`Executed ${order.type} for ${order.username} on ${order.symbol} @ ${executedPrice}`);
+            }
+        }
+    } catch (err) {
+        console.error('Order checker error:', err);
+    }
+}, 5000);
+
+// ========== TRADE HISTORY ==========
 app.get('/api/trade-history', authenticate, async (req, res) => {
     const history = await getTradeHistory(req.user.username);
     res.json({ history });
 });
-
 app.post('/api/trade-history', authenticate, async (req, res) => {
     const { trades } = req.body;
-    const ok = await saveTradeHistoryWithHash(req.user.username, trades);
+    const ok = await saveTradeHistory(req.user.username, trades);
     res.json({ success: ok });
 });
-
-// Verification endpoint (Phase 4)
 app.get('/api/trade-history/verify/:id', authenticate, async (req, res) => {
     const tradeId = parseInt(req.params.id);
     const db = await connectDb();
@@ -161,175 +339,170 @@ app.get('/api/trade-history/verify/:id', authenticate, async (req, res) => {
     try {
         const trade = await db.collection('trade_history').findOne({ id: tradeId, username: req.user.username });
         if (!trade) return res.status(404).json({ error: 'Trade not found' });
-
-        const { prevHash, id, timestamp, symbol, action, qty, price, pnl } = trade;
-        const data = `${req.user.username}|${timestamp}|${symbol}|${action}|${qty}|${price}|${pnl || ''}|${prevHash}`;
+        const data = `${req.user.username}|${trade.timestamp}|${trade.symbol}|${trade.action}|${trade.qty}|${trade.price}|${trade.pnl || ''}|${trade.prevHash}`;
         const recomputedHash = crypto.createHash('sha256').update(data).digest('hex');
         const isValid = recomputedHash === trade.hash;
-
-        res.json({ valid: isValid, storedHash: trade.hash, recomputedHash });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+        res.json({ valid: isValid });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ---------- Portfolio Value History ----------
+// ========== PORTFOLIO VALUE HISTORY ==========
 app.post('/api/portfolio-history', authenticate, async (req, res) => {
     const { timestamp, totalValue } = req.body;
     const ok = await savePortfolioHistory(req.user.username, timestamp, totalValue);
     res.json({ success: ok });
 });
-
 app.get('/api/portfolio-history', authenticate, async (req, res) => {
     const history = await getPortfolioHistory(req.user.username);
     res.json({ history });
 });
 
-// ---------- Leaderboard ----------
+// ========== LEADERBOARD ==========
 app.get('/api/leaderboard', authenticate, async (req, res) => {
     try {
         const db = await connectDb();
         if (!db) return res.status(500).json({ error: 'Database error' });
-
         const users = await db.collection('users').find({}).toArray();
         const leaderboard = [];
-
         for (const user of users) {
             const latestHistory = await db.collection('portfolio_history')
                 .find({ username: user.username })
                 .sort({ timestamp: -1 })
                 .limit(1)
                 .toArray();
-
             let totalValue = user.portfolio?.cash || 0;
             if (latestHistory.length > 0) totalValue = latestHistory[0].totalValue;
-
             const yesterday = new Date();
             yesterday.setDate(yesterday.getDate() - 1);
             const yesterdayStr = yesterday.toISOString().split('T')[0];
             const yesterdayHistory = await db.collection('portfolio_history')
                 .findOne({ username: user.username, timestamp: yesterdayStr });
-
             const previousValue = yesterdayHistory ? yesterdayHistory.totalValue : totalValue;
             const dayChange = totalValue - previousValue;
             const dayChangePct = previousValue !== 0 ? (dayChange / previousValue) * 100 : 0;
-
-            leaderboard.push({
-                username: user.username,
-                totalValue,
-                dayChange,
-                dayChangePct
-            });
+            leaderboard.push({ username: user.username, totalValue, dayChange, dayChangePct });
         }
-
         leaderboard.sort((a, b) => b.totalValue - a.totalValue);
         res.json({ leaderboard });
-    } catch (err) {
-        console.error('Leaderboard error:', err);
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ---------- User Layout (Phase 4) ----------
+// ========== USER LAYOUT ==========
 app.post('/api/user/layout', authenticate, async (req, res) => {
-    const { layout } = req.body;
     const db = await connectDb();
     if (!db) return res.status(500).json({ error: 'Database error' });
     try {
         await db.collection('users').updateOne(
             { username: req.user.username },
-            { $set: { layout } }
+            { $set: { layout: req.body.layout } }
         );
         res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.get('/api/user/layout', authenticate, async (req, res) => {
     const db = await connectDb();
     if (!db) return res.status(500).json({ error: 'Database error' });
     try {
         const user = await db.collection('users').findOne({ username: req.user.username });
         res.json({ layout: user?.layout || null });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ---------- Daily Snapshot Cron ----------
-cron.schedule('0 0 * * *', async () => {
-    console.log('Running daily portfolio snapshot cron job...');
-    try {
-        const db = await connectDb();
-        if (!db) throw new Error('Database not connected');
-
-        const users = await db.collection('users').find({}).toArray();
-        const today = new Date().toISOString().split('T')[0];
-
-        for (const user of users) {
-            const latestHistory = await db.collection('portfolio_history')
-                .find({ username: user.username })
-                .sort({ timestamp: -1 })
-                .limit(1)
-                .toArray();
-
-            let totalValue = user.portfolio?.cash || 0;
-            if (latestHistory.length > 0) totalValue = latestHistory[0].totalValue;
-
-            await db.collection('portfolio_history').updateOne(
-                { username: user.username, timestamp: today },
-                { $set: { totalValue } },
-                { upsert: true }
-            );
-        }
-        console.log(`Daily snapshot completed for ${users.length} users.`);
-    } catch (err) {
-        console.error('Daily snapshot cron job error:', err);
-    }
+// ========== PROFILE MANAGEMENT ==========
+app.post('/api/user/change-username', authenticate, async (req, res) => {
+    const { newUsername } = req.body;
+    if (!newUsername) return res.status(400).json({ error: 'New username required' });
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    const existing = await db.collection('users').findOne({ username: newUsername });
+    if (existing) return res.status(400).json({ error: 'Username already taken' });
+    await db.collection('users').updateOne(
+        { username: req.user.username },
+        { $set: { username: newUsername } }
+    );
+    await db.collection('trade_history').updateMany(
+        { username: req.user.username },
+        { $set: { username: newUsername } }
+    );
+    await db.collection('portfolio_history').updateMany(
+        { username: req.user.username },
+        { $set: { username: newUsername } }
+    );
+    res.json({ success: true });
+});
+app.post('/api/user/change-password', authenticate, async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Missing fields' });
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    const user = await db.collection('users').findOne({ username: req.user.username });
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await db.collection('users').updateOne(
+        { username: req.user.username },
+        { $set: { password: hashed } }
+    );
+    res.json({ success: true });
+});
+app.delete('/api/user/delete', authenticate, async (req, res) => {
+    const db = await connectDb();
+    if (!db) return res.status(500).json({ error: 'Database error' });
+    await db.collection('users').deleteOne({ username: req.user.username });
+    await db.collection('trade_history').deleteMany({ username: req.user.username });
+    await db.collection('portfolio_history').deleteMany({ username: req.user.username });
+    await db.collection('conditional_orders').deleteMany({ username: req.user.username });
+    res.json({ success: true });
 });
 
-// ---------- Yahoo Finance Quote ----------
+// ========== YAHOO QUOTE (cached) ==========
 app.get('/api/yahoo/quote', async (req, res) => {
     const { symbol } = req.query;
     if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+    const cacheKey = `quote:${symbol}`;
+    const cached = await getCache(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 5000) return res.json(cached);
+
     const yahooSym = toYahooSymbol(symbol);
     try {
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
         const response = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders, timeout: 8000 });
         const result = response.data.chart.result[0];
         if (!result) throw new Error('No quote data');
-        const meta = result.meta;
         const quote = result.indicators.quote[0];
         const lastClose = quote.close[quote.close.length - 1];
-        const previousClose = meta.previousClose;
-        const change = lastClose - previousClose;
-        const changePct = (change / previousClose) * 100;
-        res.json({
+        const previousClose = result.meta.previousClose;
+        const quoteData = {
             success: true,
             price: lastClose,
-            change,
-            changePct,
+            change: lastClose - previousClose,
+            changePct: ((lastClose - previousClose) / previousClose) * 100,
             volume: quote.volume[quote.volume.length - 1] || 0,
-            prevClose: previousClose
-        });
+            prevClose: previousClose,
+            timestamp: Date.now()
+        };
+        await setCache(cacheKey, quoteData, 10);
+        res.json(quoteData);
     } catch (err) {
         console.error(`Yahoo quote error ${symbol}:`, err.message);
-        if (FINNHUB_API_KEY) {
+        const alphaKey = process.env.ALPHA_VANTAGE_KEY;
+        if (alphaKey) {
             try {
-                const finnUrl = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
-                const finnRes = await axios.get(finnUrl, { timeout: 5000 });
-                const finnData = finnRes.data;
-                if (finnData && typeof finnData.c === 'number') {
-                    res.json({
-                        success: true,
-                        price: finnData.c,
-                        change: finnData.d,
-                        changePct: finnData.dp,
-                        volume: finnData.v,
-                        prevClose: finnData.pc
-                    });
-                    return;
+                const alphaUrl = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${alphaKey}`;
+                const alphaRes = await axios.get(alphaUrl, { timeout: 5000 });
+                const q = alphaRes.data['Global Quote'];
+                if (q && q['05. price']) {
+                    const price = parseFloat(q['05. price']);
+                    const change = parseFloat(q['09. change'] || 0);
+                    const changePct = parseFloat(q['10. change percent'] || 0);
+                    const quoteData = {
+                        success: true, price, change, changePct,
+                        volume: parseInt(q['06. volume'] || 0),
+                        prevClose: parseFloat(q['08. previous close'] || price),
+                        timestamp: Date.now()
+                    };
+                    await setCache(cacheKey, quoteData, 10);
+                    return res.json(quoteData);
                 }
             } catch (e) {}
         }
@@ -337,10 +510,14 @@ app.get('/api/yahoo/quote', async (req, res) => {
     }
 });
 
-// ---------- Yahoo Historical Chart ----------
+// ========== YAHOO HISTORICAL (cached) ==========
 app.get('/api/yahoo', async (req, res) => {
     const { symbol, interval = '1d', range = '1mo' } = req.query;
     if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+    const cacheKey = `historical:${symbol}:${range}`;
+    const cached = await getCache(cacheKey);
+    if (cached) return res.json({ success: true, data: cached });
+
     const yahooSym = toYahooSymbol(symbol);
     try {
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
@@ -349,23 +526,49 @@ app.get('/api/yahoo', async (req, res) => {
         if (!result) throw new Error('No data');
         const timestamps = result.timestamp;
         const quotes = result.indicators.quote[0];
-        const closes = quotes.close;
         const data = timestamps.map((t, i) => ({
             time: new Date(t * 1000).toISOString().split('T')[0],
             open: quotes.open[i],
             high: quotes.high[i],
             low: quotes.low[i],
-            close: closes[i],
+            close: quotes.close[i],
             volume: quotes.volume[i]
         })).filter(d => d.close !== null);
+        await setCache(cacheKey, data, 86400);
         res.json({ success: true, data });
     } catch (err) {
         console.error(`Yahoo chart error ${symbol}:`, err.message);
+        const alphaKey = process.env.ALPHA_VANTAGE_KEY;
+        if (alphaKey) {
+            try {
+                const alphaUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${alphaKey}`;
+                const alphaRes = await axios.get(alphaUrl, { timeout: 10000 });
+                const ts = alphaRes.data['Time Series (Daily)'];
+                if (ts) {
+                    const dates = Object.keys(ts).sort();
+                    let days = 30;
+                    if (range === '1mo') days = 30;
+                    else if (range === '3mo') days = 90;
+                    else if (range === '6mo') days = 180;
+                    else if (range === '1y') days = 365;
+                    const candles = dates.slice(-days).map(date => ({
+                        time: date,
+                        open: parseFloat(ts[date]['1. open']),
+                        high: parseFloat(ts[date]['2. high']),
+                        low: parseFloat(ts[date]['3. low']),
+                        close: parseFloat(ts[date]['4. close']),
+                        volume: parseInt(ts[date]['5. volume'])
+                    }));
+                    await setCache(cacheKey, candles, 86400);
+                    return res.json({ success: true, data: candles });
+                }
+            } catch (e) {}
+        }
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
-// ---------- Finnhub proxy ----------
+// ========== FINNHUB PROXY ==========
 app.get('/api/finnhub', async (req, res) => {
     if (!FINNHUB_API_KEY) return res.status(500).json({ error: 'No Finnhub key' });
     const { endpoint } = req.query;
@@ -373,12 +576,10 @@ app.get('/api/finnhub', async (req, res) => {
         const url = `https://finnhub.io/api/v1/${endpoint}&token=${FINNHUB_API_KEY}`;
         const response = await axios.get(url);
         res.json(response.data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ---------- News ----------
+// ========== NEWS ==========
 app.get('/api/news', async (req, res) => {
     if (!FINNHUB_API_KEY) return res.json({ news: [] });
     try {
@@ -392,47 +593,42 @@ app.get('/api/news', async (req, res) => {
             pubDate: new Date(a.datetime * 1000).toISOString()
         }));
         res.json({ news });
-    } catch (err) {
-        console.error('News error:', err.message);
-        res.json({ news: [] });
-    }
+    } catch (err) { res.json({ news: [] }); }
 });
 
-// ---------- Groq AI with Extended Actions (Phase 4) ----------
+// ========== GROQ AI ==========
 app.post('/api/copilot/query', async (req, res) => {
     if (!GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY missing' });
     const { prompt } = req.body;
     if (!prompt) return res.status(400).json({ error: 'Prompt required' });
-    
-    // Check for slash command /buy or /sell
+
     const slashMatch = prompt.match(/^\/(buy|sell)\s+(\d+(?:\.\d+)?)\s+([A-Z.^]+)$/i);
     if (slashMatch) {
         const action = slashMatch[1].toUpperCase();
         const qty = parseFloat(slashMatch[2]);
         const symbol = slashMatch[3].toUpperCase();
         if (!isNaN(qty) && qty > 0) {
-            return res.json({ 
+            return res.json({
                 text: `✓ Executed ${action} order: ${qty} shares of ${symbol}.`,
                 action: { type: action, symbol, qty }
             });
         }
     }
-    
-    // Enhanced system prompt for Phase 4 actions
+
     try {
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
                 model: 'llama-3.3-70b-versatile',
                 messages: [
-                    { 
-                        role: 'system', 
+                    {
+                        role: 'system',
                         content: `You are a financial AI assistant. If the user asks to perform any of the following actions, respond ONLY with a JSON object:
 - Buy/sell stock: {"action":"BUY" or "SELL","symbol":"AAPL","qty":10}
 - Change chart interval: {"action":"SET_INTERVAL","value":"1D","1W","1M","3M"}
 - Add symbol to watchlist: {"action":"ADD_TO_WATCHLIST","symbol":"BTC-USD"}
 - Run a backtest: {"action":"RUN_BACKTEST","indicator":"sma_cross" or "rsi" or "bb","symbol":"AAPL","qty":10}
-If the user asks a general question, respond with normal text. Do not add extra text.` 
+If the user asks a general question, respond with normal text. Do not add extra text.`
                     },
                     { role: 'user', content: prompt }
                 ],
@@ -441,9 +637,8 @@ If the user asks a general question, respond with normal text. Do not add extra 
             },
             { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
         );
-        
+
         let content = response.data.choices[0].message.content;
-        // Try to parse JSON action
         try {
             const jsonMatch = content.match(/\{.*\}/s);
             if (jsonMatch) {
@@ -454,7 +649,6 @@ If the user asks a general question, respond with normal text. Do not add extra 
                 }
             }
         } catch(e) {}
-        
         res.json({ text: content });
     } catch (err) {
         console.error('Groq error:', err.response?.data || err.message);
@@ -462,7 +656,7 @@ If the user asks a general question, respond with normal text. Do not add extra 
     }
 });
 
-// ---------- ARIMA forecast ----------
+// ========== ARIMA FORECAST ==========
 async function fetchHistoricalPrices(symbol, days = 60) {
     const yahooSym = toYahooSymbol(symbol);
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
@@ -532,12 +726,15 @@ app.get('/api/forecast/arima', async (req, res) => {
             lastPrice,
             confidenceInterval: { lower: forecast[forecast.length-1] - confidence, upper: forecast[forecast.length-1] + confidence }
         });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-// ---------- WebSocket (live price simulation) ----------
+// ========== STATIC FILES (MUST BE LAST) ==========
+app.use(express.static(__dirname));
+app.get('/', (req, res) => res.sendFile(__dirname + '/index.html'));
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+// ========== WEBSOCKET SERVER ==========
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const wss = new WebSocket.Server({ server });
 const subscribers = new Map();
@@ -572,62 +769,7 @@ setInterval(async () => {
         } catch(e) {}
         const change = (Math.random() - 0.5) * price * 0.01;
         const newPrice = price + change;
-        const msg = JSON.stringify({
-            type: 'trade',
-            symbol,
-            price: newPrice
-        });
+        const msg = JSON.stringify({ type: 'trade', symbol, price: newPrice });
         clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
     }
 }, 5000);
-
-// ---------- Profile Management ----------
-app.post('/api/user/change-username', authenticate, async (req, res) => {
-    const { newUsername } = req.body;
-    if (!newUsername) return res.status(400).json({ error: 'New username required' });
-    const db = await connectDb();
-    if (!db) return res.status(500).json({ error: 'Database error' });
-    // Check if username already taken
-    const existing = await db.collection('users').findOne({ username: newUsername });
-    if (existing) return res.status(400).json({ error: 'Username already taken' });
-    // Update user
-    await db.collection('users').updateOne(
-        { username: req.user.username },
-        { $set: { username: newUsername } }
-    );
-    // Update all collections that reference username
-    await db.collection('trade_history').updateMany(
-        { username: req.user.username },
-        { $set: { username: newUsername } }
-    );
-    await db.collection('portfolio_history').updateMany(
-        { username: req.user.username },
-        { $set: { username: newUsername } }
-    );
-    res.json({ success: true });
-});
-
-app.post('/api/user/change-password', authenticate, async (req, res) => {
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Missing fields' });
-    const db = await connectDb();
-    if (!db) return res.status(500).json({ error: 'Database error' });
-    const user = await db.collection('users').findOne({ username: req.user.username });
-    const valid = await bcrypt.compare(currentPassword, user.password);
-    if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
-    const hashed = await bcrypt.hash(newPassword, 10);
-    await db.collection('users').updateOne(
-        { username: req.user.username },
-        { $set: { password: hashed } }
-    );
-    res.json({ success: true });
-});
-
-app.delete('/api/user/delete', authenticate, async (req, res) => {
-    const db = await connectDb();
-    if (!db) return res.status(500).json({ error: 'Database error' });
-    await db.collection('users').deleteOne({ username: req.user.username });
-    await db.collection('trade_history').deleteMany({ username: req.user.username });
-    await db.collection('portfolio_history').deleteMany({ username: req.user.username });
-    res.json({ success: true });
-});

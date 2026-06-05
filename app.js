@@ -11,6 +11,8 @@ const loginConfirm = document.getElementById('login-confirm');
 const loginSubmit = document.getElementById('login-submit');
 const loginSwitch = document.getElementById('login-switch');
 let isLoginMode = true;
+let pending2FA = false;
+let pendingLoginData = null;
 
 const companyNamesMap = {
     'AAPL': 'Apple Inc.', 'MSFT': 'Microsoft Corp.', 'GOOGL': 'Alphabet Inc.', 'AMZN': 'Amazon.com Inc.',
@@ -54,15 +56,16 @@ loginSubmit.onclick = async () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Authentication failed');
         if (isLoginMode) {
-            authToken = data.token; currentUser = data.username;
-            window.portfolio = data.portfolio || { cash: 100000, holdings: {} };
-            loginOverlay.classList.add('hidden');
-            terminalInterface.classList.remove('hidden');
-            await loadPortfolioFromBackend();
-            await loadTradeHistoryFromBackend();
-            await loadPortfolioHistoryFromBackend();
-            initTerminal();
-            await savePortfolioValueSnapshot();
+            // If 2FA is enabled on the account, ask for OTP
+            if (data.twoFactorEnabled) {
+                pendingLoginData = data;
+                pending2FA = true;
+                document.getElementById('twofa-prompt').classList.remove('hidden');
+                loginError.innerText = 'Enter 2FA code';
+                return;
+            }
+            // Normal login without 2FA
+            completeLogin(data);
         } else {
             loginError.innerText = 'Registration successful! Please login.';
             setAuthMode(true);
@@ -70,6 +73,46 @@ loginSubmit.onclick = async () => {
         }
     } catch (err) { loginError.innerText = err.message; }
 };
+
+function completeLogin(data) {
+    authToken = data.token; currentUser = data.username;
+    window.portfolio = data.portfolio || { cash: 100000, holdings: {} };
+    loginOverlay.classList.add('hidden');
+    terminalInterface.classList.remove('hidden');
+    document.getElementById('twofa-prompt').classList.add('hidden');
+    document.getElementById('twofa-code').value = '';
+    pending2FA = false;
+    pendingLoginData = null;
+
+    (async () => {
+        await loadPortfolioFromBackend();
+        await loadTradeHistoryFromBackend();
+        await loadPortfolioHistoryFromBackend();
+        await loadConditionalOrders();   // will be defined later
+        initTerminal();
+        await savePortfolioValueSnapshot();
+        updateTwoFAStatusUI();           // will be defined later
+    })();
+}
+
+document.getElementById('twofa-submit').onclick = async () => {
+    if (!pending2FA || !pendingLoginData) return;
+    const otp = document.getElementById('twofa-code').value.trim();
+    if (!otp) { loginError.innerText = '2FA code required'; return; }
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: loginUsername.value.trim(), password: loginPassword.value, otp })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '2FA verification failed');
+        completeLogin(data);
+    } catch (err) {
+        loginError.innerText = err.message;
+    }
+};
+
 document.getElementById('logout-btn').onclick = () => { authToken = null; currentUser = null; terminalInterface.classList.add('hidden'); loginOverlay.classList.remove('hidden'); loginUsername.value = ''; loginPassword.value = ''; loginConfirm.value = ''; setAuthMode(true); };
 async function syncPortfolioToBackend() { if (!authToken) return; try { await fetch('/api/portfolio/sync', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({ portfolio: portfolio }) }); } catch(e) {} }
 async function loadPortfolioFromBackend() {
@@ -492,6 +535,8 @@ let currentSymbol = 'AAPL', currentInterval = '1M'; let chart = null, candleSeri
     'TXN', 'QCOM', 'AMGN', 'SBUX', 'LOW', 'UPS', 'GE', 'IBM', 'CAT', 'GS', 'MS', 'C',
     'PLD', 'SPGI', 'BLK', 'T', 'VZ', '^GSPC', '^IXIC', '^N225', 'ASHR'
 ]; let portfolio = { cash: 100000.00, holdings: {} }; let currentCandles = [];
+let activeOrders = [];
+let conditionalRefreshInterval = null;
 
 const assetTypeMap = { '^GSPC': 'index', '^IXIC': 'index', '^N225': 'index', 'ASHR': 'index' };
 function getAssetType(sym) { return assetTypeMap[sym] || 'stock'; }
@@ -1660,6 +1705,206 @@ async function updateCorrelationMatrix() {
     } catch (err) { console.error('Correlation error:', err); container.innerHTML = '<div class="text-red-500 text-[10px]">Failed to compute correlations</div>'; }
 }
 
+let current2FASecret = null;
+
+async function updateTwoFAStatusUI() {
+    try {
+        const res = await fetch('/api/auth/check-2fa', { headers: { 'Authorization': `Bearer ${authToken}` } });
+        if (res.ok) {
+            const data = await res.json();
+            const statusSpan = document.getElementById('twofa-status');
+            const enableBtn = document.getElementById('enable-2fa-btn');
+            const disableBtn = document.getElementById('disable-2fa-btn');
+            if (data.enabled) {
+                statusSpan.innerText = 'Enabled';
+                statusSpan.classList.add('text-green-500');
+                enableBtn.classList.add('hidden');
+                disableBtn.classList.remove('hidden');
+            } else {
+                statusSpan.innerText = 'Disabled';
+                statusSpan.classList.remove('text-green-500');
+                enableBtn.classList.remove('hidden');
+                disableBtn.classList.add('hidden');
+            }
+        }
+    } catch(e) { console.warn('2FA status check failed'); }
+}
+
+document.getElementById('enable-2fa-btn')?.addEventListener('click', async () => {
+    try {
+        const res = await fetch('/api/auth/enable-2fa', {
+            method: 'POST',                           // ✅ MUST be POST
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`Server error ${res.status}: ${errorText}`);
+        }
+        const data = await res.json();
+        // process QR code and secret
+        current2FASecret = data.secret;
+        const qrContainer = document.getElementById('qr-code-container');
+        qrContainer.innerHTML = `<img src="${data.qrCode}" alt="QR Code" class="mx-auto w-32 h-32">`;
+        document.getElementById('twofa-setup-area').classList.remove('hidden');
+        document.getElementById('enable-2fa-btn').classList.add('hidden');
+    } catch(err) {
+        alert('Failed to enable 2FA: ' + err.message);
+    }
+});
+document.getElementById('verify-2fa-btn')?.addEventListener('click', async () => {
+    const token = document.getElementById('otp-token').value.trim();
+    if (!token) { alert('Enter 6-digit code'); return; }
+    try {
+        const res = await fetch('/api/auth/verify-2fa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+            body: JSON.stringify({ token })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        const recoveryCodesDiv = document.getElementById('recovery-codes');
+        recoveryCodesDiv.innerHTML = `<strong>Recovery codes (save them):</strong><br>${data.recoveryCodes.join('<br>')}`;
+        alert('2FA enabled successfully. Save your recovery codes.');
+        document.getElementById('twofa-setup-area').classList.add('hidden');
+        document.getElementById('enable-2fa-btn').classList.add('hidden');
+        document.getElementById('disable-2fa-btn').classList.remove('hidden');
+        document.getElementById('twofa-status').innerText = 'Enabled';
+        document.getElementById('twofa-status').classList.add('text-green-500');
+        document.getElementById('otp-token').value = '';
+    } catch(err) { alert('Verification failed: ' + err.message); }
+});
+
+document.getElementById('disable-2fa-btn')?.addEventListener('click', async () => {
+    if (!confirm('Disable two-factor authentication? This will reduce account security.')) return;
+    try {
+        const res = await fetch('/api/auth/disable-2fa', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (res.ok) {
+            alert('2FA disabled.');
+            document.getElementById('twofa-status').innerText = 'Disabled';
+            document.getElementById('twofa-status').classList.remove('text-green-500');
+            document.getElementById('enable-2fa-btn').classList.remove('hidden');
+            document.getElementById('disable-2fa-btn').classList.add('hidden');
+        } else {
+            alert('Failed to disable 2FA');
+        }
+    } catch(err) { alert('Error: ' + err.message); }
+});
+
+// ============================================================
+// CONDITIONAL ORDERS
+// ============================================================
+async function loadConditionalOrders() {
+    if (!authToken) return;
+    try {
+        const res = await fetch('/api/orders/conditional', { headers: { 'Authorization': `Bearer ${authToken}` } });
+        if (res.ok) {
+            const data = await res.json();
+            activeOrders = data.orders || [];
+            renderConditionalOrdersList();
+        }
+    } catch(e) { console.warn('Failed to load conditional orders'); }
+}
+
+function renderConditionalOrdersList() {
+    const container = document.getElementById('active-orders-list');
+    if (!container) return;
+    if (!activeOrders.length) {
+        container.innerHTML = '<div class="text-gray-500">No active orders</div>';
+        return;
+    }
+    let html = '';
+    for (const order of activeOrders) {
+        let details = '';
+        if (order.type === 'stop_loss') details = `Stop Loss @ $${order.triggerPrice}`;
+        else if (order.type === 'take_profit') details = `Take Profit @ $${order.triggerPrice}`;
+        else if (order.type === 'trailing_stop') details = `Trailing Stop ${order.trailingPercent}%`;
+        html += `<div class="flex justify-between items-center border-b border-[#282828]/30 py-1">
+            <div><span class="font-bold">${order.symbol}</span> ${order.quantity} shrs<br><span class="text-[8px]">${details}</span></div>
+            <button class="text-red-500 text-[9px] cancel-order" data-id="${order.id}">✖</button>
+        </div>`;
+    }
+    container.innerHTML = html;
+    document.querySelectorAll('.cancel-order').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = btn.getAttribute('data-id');
+            if (confirm('Cancel this conditional order?')) {
+                try {
+                    const res = await fetch(`/api/orders/conditional/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${authToken}` } });
+                    if (res.ok) {
+                        activeOrders = activeOrders.filter(o => o.id != id);
+                        renderConditionalOrdersList();
+                    } else alert('Failed to cancel order');
+                } catch(err) { alert('Error: ' + err.message); }
+            }
+        });
+    });
+}
+
+function initConditionalOrders() {
+    const createBtn = document.getElementById('create-cond-order');
+    const condSymbol = document.getElementById('cond-symbol');
+    if (condSymbol) {
+        condSymbol.innerHTML = '';
+        watchlistSymbols.forEach(sym => {
+            const opt = document.createElement('option');
+            opt.value = sym;
+            opt.textContent = sym;
+            condSymbol.appendChild(opt);
+        });
+        condSymbol.value = currentSymbol;
+    }
+    if (createBtn) {
+        createBtn.onclick = async () => {
+            const symbol = condSymbol.value;
+            const quantity = parseFloat(document.getElementById('cond-qty').value);
+            const type = document.getElementById('cond-type').value;
+            let triggerPrice = parseFloat(document.getElementById('cond-trigger').value);
+            let trailingPercent = null;
+            if (type === 'trailing_stop') {
+                trailingPercent = parseFloat(document.getElementById('cond-trailing').value);
+                if (isNaN(trailingPercent) || trailingPercent <= 0) {
+                    alert('Please enter a valid trailing percentage');
+                    return;
+                }
+                triggerPrice = 0;
+            }
+            if (isNaN(quantity) || quantity <= 0) { alert('Invalid quantity'); return; }
+            if (type !== 'trailing_stop' && (isNaN(triggerPrice) || triggerPrice <= 0)) { alert('Invalid trigger price'); return; }
+            try {
+                const res = await fetch('/api/orders/conditional', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                    body: JSON.stringify({ symbol, type, triggerPrice, quantity, trailingPercent })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert('Conditional order created');
+                    loadConditionalOrders();
+                    document.getElementById('cond-qty').value = 1;
+                    document.getElementById('cond-trigger').value = '';
+                    document.getElementById('cond-trailing').value = '';
+                } else alert(data.error || 'Failed to create order');
+            } catch(err) { alert('Error: ' + err.message); }
+        };
+    }
+    const toggleBtn = document.getElementById('toggle-conditional-panel');
+    const content = document.getElementById('conditional-orders-content');
+    if (toggleBtn && content) {
+        toggleBtn.onclick = () => {
+            content.classList.toggle('hidden');
+            toggleBtn.innerText = content.classList.contains('hidden') ? '▶' : '▼';
+        };
+    }
+    if (conditionalRefreshInterval) clearInterval(conditionalRefreshInterval);
+    conditionalRefreshInterval = setInterval(() => loadConditionalOrders(), 10000);
+}
+
 // ============================================================
 // INITIALISE TERMINAL (NOW ALL FUNCTIONS ARE DEFINED ABOVE)
 // ============================================================
@@ -1744,6 +1989,8 @@ async function initTerminal() {
     if (tradeSymbolInput) tradeSymbolInput.addEventListener('change', updateTotalPreview);
     updateTotalPreview();
     if (typeof initBacktester === 'function') initBacktester();
+    initConditionalOrders();
+    await loadConditionalOrders();
     // Save workspace button
     const saveWsBtn = document.getElementById('save-workspace-btn');
     if (saveWsBtn) saveWsBtn.addEventListener('click', saveLayoutToBackend);

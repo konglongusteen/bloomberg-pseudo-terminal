@@ -21,6 +21,10 @@
 <input id="login-confirm" placeholder="Confirm Password" style="display: none;" type="password"/>
 <button id="login-submit">Login</button>
 <div class="switch" id="login-switch">Don't have an account? Register</div>
+<div id="twofa-prompt" class="hidden mt-3">
+    <input type="text" id="twofa-code" placeholder="6-digit 2FA code" class="w-full bg-black border border-[#282828] rounded px-2 py-1 text-sm">
+    <button id="twofa-submit" class="mt-2 w-full bg-bbAmber text-black py-1 rounded">Verify</button>
+</div>
 </div>
 </div>
 
@@ -95,6 +99,34 @@
                     </div>
                     <div class="mt-2">
                         <button class="w-full bg-amber-950 hover:bg-amber-800 text-bbAmber border border-bbAmber font-bold py-1.5 transition text-xs rounded touch-manipulation" id="sell-all-btn">SELL ALL (current symbol)</button>
+                    </div>
+                </div>
+                <!-- Conditional Orders Panel (NEW) -->
+                <div class="bg-[#050505] border border-[#282828] p-3 shrink-0 flex flex-col conditional-orders-module">
+                    <div class="flex justify-between items-center border-b border-[#282828] pb-1 mb-2 text-xs">
+                        <span class="text-bbAmber font-bold tracking-wider">⏳ CONDITIONAL ORDERS</span>
+                        <button id="toggle-conditional-panel" class="text-[10px] text-bbAmber">▼</button>
+                    </div>
+                    <div id="conditional-orders-content">
+                        <div class="space-y-2 text-[10px]">
+                            <select id="cond-symbol" class="bg-black border border-[#282828] rounded px-2 py-1 w-full"></select>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="number" id="cond-qty" placeholder="Qty" value="1" class="bg-black border border-[#282828] rounded px-2 py-1">
+                                <select id="cond-type" class="bg-black border border-[#282828] rounded px-2 py-1">
+                                    <option value="stop_loss">Stop Loss</option>
+                                    <option value="take_profit">Take Profit</option>
+                                    <option value="trailing_stop">Trailing Stop (%)</option>
+                                </select>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="number" id="cond-trigger" placeholder="Trigger price" step="0.01" class="bg-black border border-[#282828] rounded px-2 py-1">
+                                <input type="number" id="cond-trailing" placeholder="Trail % (for trailing)" step="0.1" class="bg-black border border-[#282828] rounded px-2 py-1">
+                            </div>
+                            <button id="create-cond-order" class="bg-bbAmber/20 text-bbAmber border border-bbAmber/40 w-full py-1 rounded font-bold">CREATE ORDER</button>
+                            <div id="active-orders-list" class="max-h-32 overflow-y-auto text-[9px] space-y-1 mt-2">
+                                <div class="text-gray-500">No active orders</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <!-- Portfolio Assets Module -->
@@ -263,6 +295,22 @@
                 <button id="change-password-btn" class="w-full bg-bbAmber/20 text-bbAmber border border-bbAmber/40 rounded py-2 text-sm hover:bg-bbAmber/40">Change Password</button>
             </div>
             <div class="border-t border-[#282828] my-2"></div>
+            <!-- 2FA Section -->
+            <div class="space-y-2">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm">Two‑Factor Authentication</span>
+                    <span id="twofa-status" class="text-xs text-gray-400">Disabled</span>
+                </div>
+                <button id="enable-2fa-btn" class="w-full bg-bbCyan/20 text-bbCyan border border-bbCyan/40 rounded py-2 text-sm hover:bg-bbCyan/40">Enable 2FA</button>
+                <div id="twofa-setup-area" class="hidden">
+                    <div id="qr-code-container" class="flex justify-center my-2"></div>
+                    <input type="text" id="otp-token" placeholder="Enter 6-digit code" class="w-full bg-black border border-[#282828] rounded px-3 py-2 text-sm">
+                    <button id="verify-2fa-btn" class="w-full bg-green-800 text-white rounded py-2 mt-2">Verify & Enable</button>
+                    <div id="recovery-codes" class="text-[9px] text-gray-400 mt-2"></div>
+                </div>
+                <button id="disable-2fa-btn" class="w-full bg-red-950 text-red-500 border border-red-500 rounded py-2 text-sm hidden">Disable 2FA</button>
+            </div>
+            <div class="border-t border-[#282828] my-2"></div>
             <button id="delete-account-btn" class="w-full bg-red-950 text-red-500 border border-red-500 rounded py-2 text-sm hover:bg-red-900">Delete Account (Permanent)</button>
         </div>
     </div>
@@ -291,7 +339,18 @@
                 <p>Click the <span class="text-bbCyan">👤 PROFILE</span> button to open your profile modal. There you can:<br>
                 • Change your username (you will be logged out and need to log in again).<br>
                 • Change your password (requires current password, then re‑login).<br>
+                • <strong>Two‑Factor Authentication (2FA):</strong> Enable TOTP via Google Authenticator for extra security.<br>
                 • Permanently delete your account – all portfolio, trade history, and snapshots will be erased.</p>
+            </div>
+
+            <!-- Conditional Orders -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">⏳ CONDITIONAL ORDERS</div>
+                <p>Set automatic exit orders for positions you already hold:<br>
+                • <span class="text-bbCyan">Stop Loss</span>: Sell when price falls below a trigger.<br>
+                • <span class="text-bbCyan">Take Profit</span>: Sell when price rises above a trigger.<br>
+                • <span class="text-bbCyan">Trailing Stop (%)</span>: Sell if price drops X% from its highest price since order creation.<br>
+                Orders are checked every 5 seconds and execute as market sells. Active orders are shown and can be cancelled.</p>
             </div>
 
             <!-- My Assets Module -->

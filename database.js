@@ -19,6 +19,8 @@ async function connectDb() {
         await db.collection('users').createIndex({ username: 1 }, { unique: true });
         await db.collection('trade_history').createIndex({ username: 1, timestamp: -1 });
         await db.collection('portfolio_history').createIndex({ username: 1, timestamp: 1 });
+        await db.collection('conditional_orders').createIndex({ username: 1, symbol: 1, status: 1 });
+        await db.collection('users').createIndex({ 'twoFactor.enabled': 1 });
         console.log('✅ MongoDB connected');
         return db;
     } catch (err) {
@@ -53,6 +55,24 @@ async function updateUserPortfolio(username, portfolio) {
         );
         return result.modifiedCount > 0;
     } catch (err) { return false; }
+}
+
+async function updateUserTwoFactor(username, secret, enabled, recoveryCodes = []) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        await database.collection('users').updateOne(
+            { username: username.toLowerCase() },
+            { $set: { twoFactor: { secret, enabled, recoveryCodes } } }
+        );
+        return true;
+    } catch (err) { return false; }
+}
+
+async function getUserByUsername(username) {
+    const database = await connectDb();
+    if (!database) return null;
+    return await database.collection('users').findOne({ username: username.toLowerCase() });
 }
 
 // ---------- Trade History ----------
@@ -104,13 +124,60 @@ async function savePortfolioHistory(username, timestamp, totalValue) {
     } catch (err) { return false; }
 }
 
+// ---------- Conditional Orders ----------
+async function saveConditionalOrder(order) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        await database.collection('conditional_orders').insertOne(order);
+        return true;
+    } catch (err) { return false; }
+}
+
+async function getActiveConditionalOrders(username) {
+    const database = await connectDb();
+    if (!database) return [];
+    return await database.collection('conditional_orders')
+        .find({ username: username.toLowerCase(), status: 'active' })
+        .toArray();
+}
+
+async function updateConditionalOrderStatus(orderId, status, executedPrice = null) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        const update = { $set: { status, executedAt: new Date() } };
+        if (executedPrice) update.$set.executedPrice = executedPrice;
+        await database.collection('conditional_orders').updateOne(
+            { id: orderId },
+            update
+        );
+        return true;
+    } catch (err) { return false; }
+}
+
+async function deleteConditionalOrder(orderId) {
+    const database = await connectDb();
+    if (!database) return false;
+    try {
+        await database.collection('conditional_orders').deleteOne({ id: orderId });
+        return true;
+    } catch (err) { return false; }
+}
+
 module.exports = {
     connectDb,
     getUsers,
     saveUser,
     updateUserPortfolio,
+    updateUserTwoFactor,
+    getUserByUsername,
     getTradeHistory,
     saveTradeHistory,
     getPortfolioHistory,
-    savePortfolioHistory
+    savePortfolioHistory,
+    saveConditionalOrder,
+    getActiveConditionalOrders,
+    updateConditionalOrderStatus,
+    deleteConditionalOrder
 };
