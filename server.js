@@ -791,9 +791,10 @@ async function fetchHistoricalPrices(symbol, days = 60) {
     const result = response.data.chart.result[0];
     const closes = result.indicators.quote[0].close;
     const timestamps = result.timestamp;
-    return timestamps.map((t, i) => ({ time: new Date(t * 1000), close: closes[i] })).filter(p => p.close !== null).slice(-days);
+    return timestamps.map((t, i) => ({ time: new Date(t * 1000).toISOString().split('T')[0], close: closes[i] }))
+        .filter(p => p.close !== null)
+        .slice(-days);
 }
-
 function ar2Forecast(prices, steps = 5) {
     if (prices.length < 3) return null;
     const y = prices.map(p => p.close);
@@ -854,6 +855,113 @@ app.get('/api/forecast/arima', async (req, res) => {
             confidenceInterval: { lower: forecast[forecast.length-1] - confidence, upper: forecast[forecast.length-1] + confidence }
         });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ========== MOMENTUM FORECAST ==========
+app.get('/api/forecast/momentum', async (req, res) => {
+    const { symbol, days = 20, forecastDays = 5 } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+    try {
+        // Get enough historical data (e.g., 2x the lookback + forecast days)
+        const historical = await fetchHistoricalPrices(symbol, days * 2);
+        if (!historical || historical.length < days) throw new Error('Insufficient data');
+        const closes = historical.map(c => c.close);
+        const lastPrice = closes[closes.length - 1];
+        // Calculate average daily return over the lookback period
+        let totalReturn = 0;
+        for (let i = closes.length - days; i < closes.length - 1; i++) {
+            totalReturn += (closes[i+1] - closes[i]) / closes[i];
+        }
+        const avgDailyReturn = totalReturn / days;
+        // Forecast next 'forecastDays' days
+        const forecast = [];
+        let price = lastPrice;
+        for (let i = 0; i < forecastDays; i++) {
+            price = price * (1 + avgDailyReturn);
+            forecast.push(price);
+        }
+        res.json({ success: true, symbol, forecast, lastPrice, model: `Momentum (${days}d)` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ========== VOLATILITY FORECAST ==========
+app.get('/api/forecast/volatility', async (req, res) => {
+    const { symbol, days = 20, forecastDays = 5 } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+    try {
+        const historical = await fetchHistoricalPrices(symbol, days + 5);
+        if (!historical || historical.length < days) throw new Error('Insufficient data');
+        const closes = historical.map(c => c.close);
+        // Calculate daily returns over the lookback period
+        const returns = [];
+        for (let i = closes.length - days - 1; i < closes.length - 1; i++) {
+            returns.push((closes[i+1] - closes[i]) / closes[i]);
+        }
+        const meanReturn = returns.reduce((a,b) => a+b,0) / returns.length;
+        const variance = returns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / returns.length;
+        const dailyVol = Math.sqrt(variance);
+        const annualizedVol = dailyVol * Math.sqrt(252);
+        // Simple forecast: assume constant volatility for next 5 days
+        res.json({ success: true, symbol, dailyVol: dailyVol.toFixed(4), annualizedVol: (annualizedVol * 100).toFixed(2) + '%', message: 'Historical volatility (last ' + days + ' days)' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ========== PAIR TRADING (Statistical Arbitrage) ==========
+const stats = require('simple-statistics');
+
+app.get('/api/pairs/analysis', async (req, res) => {
+    const { symbol1, symbol2, days = 60 } = req.query;
+    if (!symbol1 || !symbol2) return res.status(400).json({ error: 'Both symbols required' });
+    try {
+        const candles1 = await fetchHistoricalPrices(symbol1, days);
+        const candles2 = await fetchHistoricalPrices(symbol2, days);
+        if (!candles1.length || !candles2.length) throw new Error('Insufficient data');
+        // Align dates (use the common dates)
+        const dates1 = candles1.map(c => c.time);
+        const dates2 = candles2.map(c => c.time);
+        const commonDates = dates1.filter(d => dates2.includes(d));
+        if (commonDates.length < 30) throw new Error('Not enough common trading days');
+        const prices1 = [];
+        const prices2 = [];
+        for (const date of commonDates) {
+            const p1 = candles1.find(c => c.time === date).close;
+            const p2 = candles2.find(c => c.time === date).close;
+            prices1.push(p1);
+            prices2.push(p2);
+        }
+        // Linear regression: prices2 = alpha + beta * prices1
+        const regression = stats.linearRegression(prices1.map((x,i) => [x, prices2[i]]));
+        const beta = regression.m;
+        const alpha = regression.b;
+        // Calculate spread = prices2 - (alpha + beta * prices1)
+        const spread = prices2.map((y, i) => y - (alpha + beta * prices1[i]));
+        const meanSpread = stats.mean(spread);
+        const stdSpread = stats.standardDeviation(spread);
+        const currentPrice1 = prices1[prices1.length-1];
+        const currentPrice2 = prices2[prices2.length-1];
+        const currentSpread = currentPrice2 - (alpha + beta * currentPrice1);
+        const zScore = (currentSpread - meanSpread) / stdSpread;
+        const correlation = stats.sampleCorrelation(prices1, prices2);
+        res.json({
+            success: true,
+            symbol1, symbol2,
+            beta: beta.toFixed(4),
+            alpha: alpha.toFixed(2),
+            correlation: correlation.toFixed(4),
+            meanSpread: meanSpread.toFixed(2),
+            stdSpread: stdSpread.toFixed(2),
+            currentSpread: currentSpread.toFixed(2),
+            zScore: zScore.toFixed(2),
+            signal: zScore > 1.5 ? 'Sell spread (mean reversion expected down)' : (zScore < -1.5 ? 'Buy spread (mean reversion expected up)' : 'Neutral'),
+            dataPoints: commonDates.length
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // ========== STATIC FILES (MUST BE LAST) ==========

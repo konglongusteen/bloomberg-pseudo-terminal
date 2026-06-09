@@ -208,7 +208,12 @@
                         <div class="indicator-card"><span class="indicator-label">RSI (14)</span><span class="indicator-value" id="rsi-value">--</span><span class="text-[9px]" id="rsi-signal">--</span></div>
                         <div class="indicator-card"><span class="indicator-label">MACD</span><span class="indicator-value" id="macd-value">--</span><span class="text-[9px]" id="macd-signal">--</span></div>
                         <div class="indicator-card"><span class="indicator-label">Bollinger Bands</span><span class="indicator-value" id="bb-status">--</span><span class="text-[9px]" id="bb-signal">--</span></div>
-                        <div class="indicator-card"><span class="indicator-label">Forecast Model</span><select class="bg-black text-bbAmber text-xs border border-[#282828] rounded px-1" id="forecast-model"><option value="linear">Linear (Simple)</option><option value="arima">ARIMA (Backend)</option></select></div>
+                        <div class="indicator-card"><span class="indicator-label">Forecast Model</span><select class="bg-black text-bbAmber text-xs border border-[#282828] rounded px-1" id="forecast-model">
+    <option value="linear">Linear (Simple)</option>
+    <option value="arima">ARIMA (Backend)</option>
+    <option value="momentum20">Momentum (20d)</option>
+    <option value="momentum50">Momentum (50d)</option>
+</select></div>
                         <div class="indicator-card"><span class="indicator-label">Forecast (5d)</span><span class="indicator-value" id="forecast-price">--</span><span class="text-[9px]" id="forecast-dir">--</span></div>
                     </div>
                 </div>
@@ -263,6 +268,7 @@
                         <div>Sharpe Ratio:</div><div id="risk-sharpe" class="font-bold text-right">--</div>
                         <div>Sortino Ratio:</div><div id="risk-sortino" class="font-bold text-right">--</div>
                         <div>Max Drawdown:</div><div id="risk-maxdd" class="font-bold text-right">--</div>
+<div>5‑Day Volatility (Ann.):</div><div id="risk-volatility" class="font-bold text-right">--</div>
                     </div>
                 </div>
 
@@ -304,7 +310,24 @@
                         </div>
                     </div>
                 </div>
-
+<!-- ========== PAIR TRADING (Statistical Arbitrage) ========== -->
+<div class="bg-[#050505] border border-[#282828] p-3 flex flex-col pair-trading-module">
+    <div class="flex justify-between items-center cursor-pointer" onclick="togglePairTrading()">
+        <span class="text-bbAmber font-bold text-xs">🔗 PAIR TRADING (Cointegration)</span>
+        <span class="text-[10px] text-gray-400 collapse-arrow" id="pair-arrow">▼</span>
+    </div>
+    <div id="pair-trading-content" class="mt-2 space-y-2">
+        <div class="flex gap-2">
+            <input type="text" id="pair-symbol1" placeholder="Symbol 1 (e.g., AAPL)" class="bg-black text-[10px] border border-[#282828] rounded px-2 py-1 flex-1">
+            <input type="text" id="pair-symbol2" placeholder="Symbol 2 (e.g., MSFT)" class="bg-black text-[10px] border border-[#282828] rounded px-2 py-1 flex-1">
+            <button id="analyze-pair-btn" class="bg-bbAmber/20 text-bbAmber border border-bbAmber/40 px-2 py-1 rounded text-[10px]">Analyze</button>
+        </div>
+        <div id="pair-analysis-result" class="text-[9px] min-h-[120px]">
+            <div class="text-gray-400 text-center">Enter two symbols and click Analyze</div>
+        </div>
+        <div class="text-[8px] text-gray-500 text-center">Linear regression spread with z-score. |z|>1.5 suggests mean reversion opportunity.</div>
+    </div>
+</div>
                 <!-- AI COPILOT -->
                 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col flex-1 min-h-0 relative ai-module" style="min-height: 320px;">
                     <div class="absolute top-0 right-0 w-16 h-0.5 bg-bbCyan"></div>
@@ -396,131 +419,148 @@
             <button class="bg-[#1a1a1a] border border-[#282828] px-2 py-1 text-bbAmber hover:bg-bbAmber hover:text-black transition rounded text-[10px]" onclick="toggleHelpModal()">✖</button>
         </h2>
         <div class="space-y-5 text-[11px] text-neutral-300">
-            <!-- Basic Controls -->
+            <!-- BASIC CONTROLS -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📌 BASIC CONTROLS</div>
                 <p>• Click any symbol in the watchlist to view its chart.<br>
-                • Use BUY/SELL buttons or keyboard shortcuts: <span class="text-bbCyan">Ctrl+B</span> (Buy), <span class="text-bbCyan">Ctrl+S</span> (Sell), <span class="text-bbCyan">Ctrl+A</span> (Sell All).<br>
-                • The order total updates automatically as you change quantity.<br>
-                • Toggle between dark/light mode using the 🌓 button.<br>
-                • Save your panel layout (resized columns, collapsed modules) with <span class="text-bbCyan">💾 SAVE WS</span> – it will restore on next login.</p>
+                • BUY/SELL buttons or keyboard shortcuts: <span class="text-bbCyan">Ctrl+B</span> (Buy), <span class="text-bbCyan">Ctrl+S</span> (Sell), <span class="text-bbCyan">Ctrl+A</span> (Sell All).<br>
+                • Order total updates automatically as you change quantity.<br>
+                • Dark/light mode toggle (🌓).<br>
+                • Save panel layout with <span class="text-bbCyan">💾 SAVE WS</span> – restores on next login.</p>
             </div>
-            <!-- Profile & Account Management -->
+
+            <!-- PROFILE & 2FA -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">👤 PROFILE SETTINGS</div>
-                <p>Click the <span class="text-bbCyan">👤 PROFILE</span> button to open your profile modal. There you can:<br>
-                • Change your username (you will be logged out and need to log in again).<br>
-                • Change your password (requires current password, then re‑login).<br>
-                • <strong>Two‑Factor Authentication (2FA):</strong> Enable TOTP via Google Authenticator for extra security.<br>
-                • Permanently delete your account – all portfolio, trade history, and snapshots will be erased.</p>
+                <p>Click <span class="text-bbCyan">👤 PROFILE</span> to:<br>
+                • Change username/password (requires re‑login).<br>
+                • Enable/disable Two‑Factor Authentication (TOTP) with Google Authenticator.<br>
+                • Permanently delete your account (all data erased).</p>
             </div>
-            <!-- Conditional Orders -->
+
+            <!-- CONDITIONAL ORDERS -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">⏳ CONDITIONAL ORDERS</div>
-                <p>Set automatic exit orders for positions you already hold:<br>
-                • <span class="text-bbCyan">Stop Loss</span>: Sell when price falls below a trigger.<br>
-                • <span class="text-bbCyan">Take Profit</span>: Sell when price rises above a trigger.<br>
-                • <span class="text-bbCyan">Trailing Stop (%)</span>: Sell if price drops X% from its highest price since order creation.<br>
-                Orders are checked every 5 seconds and execute as market sells. Active orders are shown and can be cancelled.</p>
+                <p>Automatic exit orders for existing positions:<br>
+                • <span class="text-bbCyan">Stop Loss</span> – sell when price falls below trigger.<br>
+                • <span class="text-bbCyan">Take Profit</span> – sell when price rises above trigger.<br>
+                • <span class="text-bbCyan">Trailing Stop (%)</span> – sell if price drops X% from its highest since creation.<br>
+                Orders are checked every 5 seconds; active orders can be cancelled.</p>
             </div>
-            <!-- My Assets Module -->
+
+            <!-- MY ASSETS -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">💼 MY ASSETS</div>
-                <p>Displays all your current holdings with quantity, total value, and daily P&amp;L. Click any asset to jump to its chart. Use the search box to filter by symbol. This module appears in the left panel (desktop) and is reordered in portrait mode between the trade module and strategy builder.</p>
+                <p>Shows all your holdings with quantity, total value, and daily P&amp;L. Click any asset to jump to its chart. Use the search box to filter. Located in the left panel (desktop) or reordered in portrait mode.</p>
             </div>
-            <!-- Correlation Matrix -->
+
+            <!-- CORRELATION MATRIX -->
             <div>
-                <div class="text-bbAmber font-bold text-xs mb-1">📈 CORRELATION MATRIX (30-day)</div>
-                <p>Shows how closely your top 5 holdings + S&P 500 move together.<br>
-                • <span class="text-green-500">Green</span> = positive correlation (move in same direction).<br>
-                • <span class="text-red-500">Red</span> = negative correlation (move opposite).<br>
-                • Use it to detect over‑concentration: if many stocks are highly correlated (e.g., >0.7), your portfolio may lack diversification.<br>
-                • Click the <span class="text-bbCyan">⟳</span> button to refresh the matrix. The panel is collapsible.</p>
+                <div class="text-bbAmber font-bold text-xs mb-1">📈 CORRELATION MATRIX (30d)</div>
+                <p>Shows how your top 5 holdings + S&P 500 move together.<br>
+                • <span class="text-green-500">Green</span> = positive correlation.<br>
+                • <span class="text-red-500">Red</span> = negative correlation.<br>
+                Use it to avoid over‑concentration. Click ⟳ to refresh.</p>
             </div>
-            <!-- Strategy Builder (Backtester) -->
+
+            <!-- STRATEGY BUILDER (BACKTESTER) -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📊 STRATEGY BUILDER (Backtester)</div>
-                <p>Simulate trading strategies using historical data (last 180 days). Choose a symbol, indicator, and quantity, then click <span class="text-bbAmber">RUN</span> or <span class="text-green-500">GO</span>.<br>
-                • <span class="text-bbCyan">SMA Crossover:</span> Buys when 20-day SMA crosses above 50-day SMA, sells on opposite cross.<br>
-                • <span class="text-bbCyan">RSI:</span> Buys when RSI drops below 30 (oversold), sells when RSI rises above 70 (overbought).<br>
-                • <span class="text-bbCyan">Bollinger Bands:</span> Buys when price touches lower band, sells when price touches upper band.<br>
-                • Results show total P&amp;L, total trades, win rate, average P&amp;L per trade, max drawdown, and a full trade log.</p>
+                <p>Simulate strategies on historical data (last 180 days):<br>
+                • <span class="text-bbCyan">SMA Crossover</span> – buy when 20‑SMA crosses above 50‑SMA, sell on opposite.<br>
+                • <span class="text-bbCyan">RSI</span> – buy when RSI <30 (oversold), sell when RSI >70 (overbought).<br>
+                • <span class="text-bbCyan">Bollinger Bands</span> – buy at lower band, sell at upper band.<br>
+                Results show total P&amp;L, win rate, max drawdown, and trade log.</p>
             </div>
-            <!-- AI Copilot -->
+
+            <!-- RISK METRICS -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📊 PORTFOLIO RISK METRICS</div>
+                <p>Quantitative evaluation from daily portfolio snapshots:<br>
+                • <span class="text-bbCyan">Sharpe Ratio</span> – risk‑adjusted return (higher is better).<br>
+                • <span class="text-bbCyan">Sortino Ratio</span> – focuses only on downside volatility.<br>
+                • <span class="text-bbCyan">Max Drawdown</span> – largest peak‑to‑trough decline.<br>
+                • <span class="text-bbCyan">5‑Day Volatility (Annualized)</span> – historical volatility of the current symbol.</p>
+            </div>
+
+            <!-- MACRO DASHBOARD (FRED) -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">🏦 MACRO DASHBOARD (FRED)</div>
+                <p>Live economic indicators (requires <span class="text-bbCyan">FRED_API_KEY</span> in .env):<br>
+                • 10Y & 2Y Treasury yields – recession signal when 2Y > 10Y (inverted curve).<br>
+                • CPI (YoY) – inflation measure.<br>
+                • Fed Funds Rate – central bank policy rate.<br>
+                Data cached for 24 hours.</p>
+            </div>
+
+            <!-- CORPORATE FUNDAMENTALS -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">📄 CORPORATE FUNDAMENTALS</div>
+                <p>Deep dive into any stock (requires <span class="text-bbCyan">ALPHA_VANTAGE_KEY</span>):<br>
+                • Market Cap, P/E, EPS, Dividend Yield, Beta, 52‑week range, Revenue, Profit Margin, Debt/Equity.<br>
+                • Data cached for 24 hours. Enter a symbol and click Fetch.</p>
+            </div>
+
+            <!-- PAIR TRADING -->
+            <div>
+                <div class="text-bbAmber font-bold text-xs mb-1">🔗 PAIR TRADING (Statistical Arbitrage)</div>
+                <p>Analyse two symbols for mean‑reversion opportunities:<br>
+                • Linear regression (beta/alpha) and correlation.<br>
+                • Spread Z‑score – |z| > 1.5 suggests a potential trade.<br>
+                • <span class="text-bbCyan">z > 1.5</span> → sell spread (overextended).<br>
+                • <span class="text-bbCyan">z < -1.5</span> → buy spread (oversold).<br>
+                Requires at least 30 common trading days.</p>
+            </div>
+
+            <!-- AI COPILOT -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">🤖 AI COPILOT (Groq)</div>
-                <p>• Ask market questions – the AI will answer concisely.<br>
-                • Use slash commands: <span class="text-bbCyan">/buy 5 AAPL</span> or <span class="text-bbCyan">/sell 10 TSLA</span> to execute trades instantly.<br>
-                • Natural language like "buy 2 shares of NVDA" will also work and generate clickable buttons.<br>
-                • Advanced actions: <span class="text-bbCyan">"change chart to 3M"</span>, <span class="text-bbCyan">"add BTC-USD to watchlist"</span>, <span class="text-bbCyan">"run SMA crossover backtest on AAPL with 5 shares"</span>.<br>
-                • Rate‑limited to 3 queries per minute.</p>
+                <p>• Ask market questions – AI answers concisely.<br>
+                • Slash commands: <span class="text-bbCyan">/buy 5 AAPL</span> or <span class="text-bbCyan">/sell 10 TSLA</span> to trade.<br>
+                • Natural language works too: "buy 2 shares of NVDA".<br>
+                • Advanced: "change chart to 3M", "add BTC-USD to watchlist", "run SMA crossover backtest on AAPL with 5 shares".<br>
+                • Rate limit: 3 queries per minute.</p>
             </div>
-            <!-- Technical Indicators & Forecast -->
+
+            <!-- TECHNICAL INDICATORS & FORECAST -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📉 TECHNICAL INDICATORS & FORECAST</div>
-                <p>• RSI (14), MACD, Bollinger Bands (20,2) are shown below the chart.<br>
-                • Forecast models: Linear regression (frontend) or ARIMA (backend – uses Yahoo data). Toggle <span class="text-bbCyan">Forecast</span> to see a 5‑day price projection on the chart.<br>
-                • You can switch between candlestick and line chart.</p>
+                <p>• RSI (14), MACD, Bollinger Bands (20,2) below chart.<br>
+                • Forecast models: Linear, ARIMA (backend), Momentum (20d/50d). Toggle <span class="text-bbCyan">Forecast</span> on chart to see 5‑day projection.<br>
+                • Switch between candlestick and line chart.</p>
             </div>
-            <!-- Portfolio & Trade History -->
+
+            <!-- PORTFOLIO & TRADE HISTORY -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📋 PORTFOLIO & TRADE HISTORY</div>
-                <p>• Your cash balance and holdings are displayed in the footer. Click any holding to jump to its chart.<br>
-                • The <span class="text-bbCyan">TRADE HISTORY</span> button opens a modal with all your past trades. Each trade has a <span class="text-bbCyan">Verify</span> button – this checks the cryptographic signature (SHA-256 hash chain) to ensure the trade record has not been tampered with (audit trail).<br>
-                • The Portfolio Value History chart shows your total portfolio value over time (1W/1M/3M ranges). The Portfolio Composition doughnut chart shows the percentage of cash vs each holding, with a colour legend on the right in landscape mode.</p>
+                <p>• Cash and holdings footer – click a holding to jump to its chart.<br>
+                • <span class="text-bbCyan">TRADE HISTORY</span> modal: each trade has a <span class="text-bbCyan">Verify</span> button to check cryptographic signature (tamper‑proof audit trail).<br>
+                • Portfolio Value History chart (1W/1M/3M ranges) and Composition doughnut with colour legend.</p>
             </div>
-<!-- Risk Metrics -->
-<div>
-    <div class="text-bbAmber font-bold text-xs mb-1">📊 PORTFOLIO RISK METRICS</div>
-    <p>Quantitative evaluation of your trading performance:<br>
-    • <span class="text-bbCyan">Sharpe Ratio</span> – risk-adjusted return (higher is better, >1 is good).<br>
-    • <span class="text-bbCyan">Sortino Ratio</span> – focuses only on downside volatility.<br>
-    • <span class="text-bbCyan">Max Drawdown</span> – largest peak-to-trough decline in portfolio value.<br>
-    These are calculated from your daily portfolio snapshots. The risk‑free rate uses the 10‑year Treasury yield (FRED) or a default 2%.</p>
-</div>
 
-<!-- Macro Dashboard -->
-<div>
-    <div class="text-bbAmber font-bold text-xs mb-1">🏦 MACRO DASHBOARD (FRED)</div>
-    <p>Live economic indicators from the Federal Reserve Economic Data (FRED):<br>
-    • <span class="text-bbCyan">10Y & 2Y Treasury yields</span> – key for bond markets and recession signals (inverted curve when 2Y > 10Y).<br>
-    • <span class="text-bbCyan">CPI (YoY)</span> – Consumer Price Index, a primary inflation measure.<br>
-    • <span class="text-bbCyan">Fed Funds Rate</span> – central bank policy rate.<br>
-    Data updates daily, cached for 24h. Requires a free FRED API key (set <span class="text-bbCyan">FRED_API_KEY</span> in .env).</p>
-</div>
-
-<!-- Corporate Fundamentals -->
-<div>
-    <div class="text-bbAmber font-bold text-xs mb-1">📄 CORPORATE FUNDAMENTALS</div>
-    <p>Deep dive into any stock’s financial health using Alpha Vantage data:<br>
-    • Enter a symbol (e.g., AAPL) and click <span class="text-bbCyan">Fetch</span>.<br>
-    • Displays Market Cap, P/E, EPS, Dividend Yield, Beta, 52‑week range, Revenue, Profit Margin, Debt/Equity.<br>
-    • Data is cached for 24 hours to respect API rate limits. Requires a free Alpha Vantage key (<span class="text-bbCyan">ALPHA_VANTAGE_KEY</span> in .env).</p>
-</div>
-            <!-- Watchlist & Filters -->
+            <!-- WATCHLIST & FILTERS -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">🔍 WATCHLIST & FILTERS</div>
-                <p>• 50 US stocks + 4 major indices.<br>
-                • Use search, favourites (★), gainers/losers filter, and asset type filter (stock/index).<br>
-                • Click the refresh (⟳) button to reload all quotes.<br>
-                • Symbols flash green (up) or red (down) on price changes.</p>
+                <p>50 US stocks + 4 indices. Use search, favourites (★), gainers/losers, asset type (stock/index). Refresh quotes with ⟳ button. Symbols flash green (up) or red (down) on price changes.</p>
             </div>
-            <!-- Persistent Workspace -->
+
+            <!-- PERSISTENT WORKSPACE -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">💾 PERSISTENT WORKSPACE</div>
-                <p>• Resize the left/center/right panels by dragging the gray handles. Collapse any expandable section (Strategy Builder, Correlation Matrix).<br>
-                • Click <span class="text-bbCyan">💾 SAVE WS</span> to store your panel sizes and collapsed states to your user profile. On next login, your workspace will be restored exactly as you left it.</p>
+                <p>Drag gray handles to resize panels. Collapse any expandable section (Strategy Builder, Correlation Matrix, etc.). Click <span class="text-bbCyan">💾 SAVE WS</span> to store layout to your user profile – restored on next login.</p>
             </div>
-            <!-- Leaderboard -->
+
+            <!-- LEADERBOARD -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">🏆 LEADERBOARD</div>
-                <p>Compares all registered users by their latest portfolio total value. Shows 24h absolute and percentage change. Sorted descending by total value. Access via the trophy button in the header.</p>
+                <p>Compares all users by portfolio total value, with 24h absolute and percentage change. Access via trophy button in header.</p>
             </div>
-            <!-- News & Top Movers -->
+
+            <!-- NEWS & TOP MOVERS -->
             <div>
                 <div class="text-bbAmber font-bold text-xs mb-1">📰 NEWS & TOP MOVERS</div>
-                <p>• Latest financial news from Finnhub (refreshes every 2 minutes).<br>
-                • Top 5 gainers and losers from your watchlist are displayed in real time.</p>
+                <p>• Latest financial news (Finnhub, refreshes every 2 minutes).<br>
+                • Top 5 gainers and losers from your watchlist, updated in real time.</p>
             </div>
         </div>
     </div>

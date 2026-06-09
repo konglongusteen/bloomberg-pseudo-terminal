@@ -889,7 +889,42 @@ async function updateForecastPanel(candles) {
             forecastDirSpan.className = 'text-[9px] signal-neutral';
             return null;
         }
+    } else if (selectedModel === 'momentum20') {
+        try {
+            const res = await fetch(`/api/forecast/momentum?symbol=${currentSymbol}&days=20&forecastDays=5`);
+            const data = await res.json();
+            if (data.success) {
+                const futurePrice = data.forecast[data.forecast.length - 1];
+                const direction = futurePrice > data.lastPrice ? 'Bullish' : (futurePrice < data.lastPrice ? 'Bearish' : 'Neutral');
+                forecastPriceSpan.innerHTML = `$${futurePrice.toFixed(2)}`;
+                forecastDirSpan.innerHTML = `${direction} over 5 days (Momentum 20d)`;
+                forecastDirSpan.className = `text-[9px] ${direction === 'Bullish' ? 'signal-bullish' : (direction === 'Bearish' ? 'signal-bearish' : 'signal-neutral')}`;
+                return data.forecast;
+            } else throw new Error(data.error);
+        } catch (err) {
+            forecastPriceSpan.innerText = 'Error';
+            forecastDirSpan.innerText = 'Momentum failed';
+            return null;
+        }
+    } else if (selectedModel === 'momentum50') {
+        try {
+            const res = await fetch(`/api/forecast/momentum?symbol=${currentSymbol}&days=50&forecastDays=5`);
+            const data = await res.json();
+            if (data.success) {
+                const futurePrice = data.forecast[data.forecast.length - 1];
+                const direction = futurePrice > data.lastPrice ? 'Bullish' : (futurePrice < data.lastPrice ? 'Bearish' : 'Neutral');
+                forecastPriceSpan.innerHTML = `$${futurePrice.toFixed(2)}`;
+                forecastDirSpan.innerHTML = `${direction} over 5 days (Momentum 50d)`;
+                forecastDirSpan.className = `text-[9px] ${direction === 'Bullish' ? 'signal-bullish' : (direction === 'Bearish' ? 'signal-bearish' : 'signal-neutral')}`;
+                return data.forecast;
+            } else throw new Error(data.error);
+        } catch (err) {
+            forecastPriceSpan.innerText = 'Error';
+            forecastDirSpan.innerText = 'Momentum failed';
+            return null;
+        }
     } else {
+        // Linear regression
         const forecast = linearRegressionForecast(closes, 5);
         if (forecast && forecast.length) {
             const lastPrice = closes[closes.length - 1];
@@ -1244,14 +1279,23 @@ async function refreshRiskMetrics() {
         document.getElementById('risk-sharpe').innerText = data.sharpe !== null ? data.sharpe : 'N/A';
         document.getElementById('risk-sortino').innerText = data.sortino !== null ? data.sortino : 'N/A';
         document.getElementById('risk-maxdd').innerText = data.maxDrawdown !== null ? data.maxDrawdown : 'N/A';
+        
+        // Fetch volatility for the current symbol
+        const volRes = await fetch(`/api/forecast/volatility?symbol=${currentSymbol}&days=20`);
+        const volData = await volRes.json();
+        if (volData.success) {
+            document.getElementById('risk-volatility').innerText = volData.annualizedVol;
+        } else {
+            document.getElementById('risk-volatility').innerText = 'N/A';
+        }
     } catch(err) {
         console.warn('Failed to fetch risk metrics:', err);
         document.getElementById('risk-sharpe').innerText = 'Error';
         document.getElementById('risk-sortino').innerText = 'Error';
         document.getElementById('risk-maxdd').innerText = 'Error';
+        document.getElementById('risk-volatility').innerText = 'Error';
     }
 }
-
 // ============================================================
 // MACRO DASHBOARD (FRED)
 // ============================================================
@@ -1991,6 +2035,43 @@ async function updateTwoFAStatusUI() {
 
 // The event listeners for enable/verify/disable are already defined earlier in the complete app.js.
 // Ensure they are present (they are – the earlier full file includes them).
+
+async function analyzePair() {
+    const symbol1 = document.getElementById('pair-symbol1').value.trim().toUpperCase();
+    const symbol2 = document.getElementById('pair-symbol2').value.trim().toUpperCase();
+    const resultDiv = document.getElementById('pair-analysis-result');
+    
+    if (!symbol1 || !symbol2) {
+        resultDiv.innerHTML = '<span class="text-red-500">Please enter both symbols.</span>';
+        return;
+    }
+    
+    resultDiv.innerHTML = '<span class="text-gray-400">Loading analysis...</span>';
+    
+    try {
+        const response = await fetch(`/api/pairs/analysis?symbol1=${encodeURIComponent(symbol1)}&symbol2=${encodeURIComponent(symbol2)}&days=60`);
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) {
+            resultDiv.innerHTML = `<span class="text-red-500">Error: ${data.error || 'Analysis failed'}</span>`;
+            return;
+        }
+        
+        const signalClass = data.zScore > 1.5 ? 'text-green-500' : (data.zScore < -1.5 ? 'text-red-500' : 'text-yellow-500');
+        resultDiv.innerHTML = `
+            <div class="text-xs space-y-1">
+                <div><strong>β (Beta):</strong> ${data.beta}</div>
+                <div><strong>α (Alpha):</strong> ${data.alpha}</div>
+                <div><strong>Correlation:</strong> ${data.correlation}</div>
+                <div><strong>Spread Z‑Score:</strong> <span class="${signalClass}">${data.zScore}</span></div>
+                <div><strong>Signal:</strong> <span class="${signalClass}">${data.signal}</span></div>
+                <div><strong>Data points:</strong> ${data.dataPoints}</div>
+            </div>
+        `;
+    } catch (err) {
+        resultDiv.innerHTML = `<span class="text-red-500">Network error: ${err.message}</span>`;
+    }
+}
 // ============================================================
 // INITIALISE TERMINAL
 // ============================================================
@@ -2018,6 +2099,9 @@ async function initTerminal() {
     document.getElementById('refresh-macro')?.addEventListener('click', refreshMacroDashboard);
     document.getElementById('fetch-fundamentals')?.addEventListener('click', fetchFundamentals);
     document.getElementById('fund-symbol')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') fetchFundamentals(); });
+    document.getElementById('analyze-pair-btn')?.addEventListener('click', analyzePair);
+document.getElementById('pair-symbol1')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') analyzePair(); });
+document.getElementById('pair-symbol2')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') analyzePair(); });
     setTimeout(() => updateCorrelationMatrix(), 5000);
     setInterval(() => updateCorrelationMatrix(), 60000);
     setInterval(refreshRiskMetrics, 60000);
