@@ -328,6 +328,24 @@
         <div class="text-[8px] text-gray-500 text-center">Linear regression spread with z-score. |z|>1.5 suggests mean reversion opportunity.</div>
     </div>
 </div>
+
+<!-- ========== NEWS FARMER (Sentiment Prediction) ========== -->
+<div class="bg-[#050505] border border-[#282828] p-3 flex flex-col news-farmer-module">
+    <div class="flex justify-between items-center cursor-pointer" onclick="toggleNewsFarmer()">
+        <span class="text-bbAmber font-bold text-xs">🌾 NEWS FARMER (7‑day Prediction)</span>
+        <span class="text-[10px] text-gray-400 collapse-arrow" id="nf-arrow">▼</span>
+    </div>
+    <div id="news-farmer-content" class="mt-2 space-y-2">
+        <div class="flex gap-2">
+            <input type="text" id="nf-symbol" placeholder="Symbol (e.g., AAPL)" class="bg-black text-[10px] border border-[#282828] rounded px-2 py-1 flex-1" value="AAPL">
+            <button id="run-news-farmer" class="bg-bbAmber/20 text-bbAmber border border-bbAmber/40 px-3 py-1 rounded text-[10px] font-bold">ANALYZE</button>
+        </div>
+        <div id="news-farmer-result" class="text-[10px] space-y-2 min-h-[200px]">
+            <div class="text-gray-400 text-center">Click ANALYZE to predict next week's direction based on news sentiment.</div>
+        </div>
+    </div>
+</div>
+
                 <!-- AI COPILOT -->
                 <div class="bg-[#050505] border border-[#282828] p-3 flex flex-col flex-1 min-h-0 relative ai-module" style="min-height: 320px;">
                     <div class="absolute top-0 right-0 w-16 h-0.5 bg-bbCyan"></div>
@@ -594,6 +612,14 @@ window.toggleFundamentals = window.toggleFundamentals || function() {
     if (content) {
         content.classList.toggle('hidden');
         if (arrow) arrow.innerText = content.classList.contains('hidden') ? '▶' : '▼';
+    }
+};
+window.toggleNewsFarmer = function() {
+    const content = document.getElementById('news-farmer-content');
+    const arrow = document.getElementById('nf-arrow');
+    if (content) {
+        content.classList.toggle('hidden');
+        arrow.innerText = content.classList.contains('hidden') ? '▶' : '▼';
     }
 };
 </script>

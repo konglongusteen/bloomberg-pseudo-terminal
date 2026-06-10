@@ -487,6 +487,34 @@ app.get('/api/portfolio-history', authenticate, async (req, res) => {
 });
 
 // ========== LEADERBOARD ==========
+// Helper: compute current portfolio value using live prices (cached or fetched)
+async function computeCurrentPortfolioValue(portfolio, username) {
+    let total = portfolio.cash || 0;
+    const holdings = portfolio.holdings || {};
+    for (const [symbol, holding] of Object.entries(holdings)) {
+        if (!holding.qty) continue;
+        let price = null;
+        // Try to get cached quote from Redis
+        const cached = await getCache(`quote:${symbol}`);
+        if (cached && cached.price) {
+            price = cached.price;
+        } else {
+            // Fallback: fetch fresh quote from Yahoo
+            try {
+                const yahooSym = toYahooSymbol(symbol);
+                const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}`;
+                const response = await axios.get(url, { params: { interval: '1d', range: '1d' }, headers: yahooHeaders, timeout: 5000 });
+                const lastClose = response.data.chart.result[0]?.indicators.quote[0]?.close.slice(-1)[0];
+                if (lastClose) price = lastClose;
+            } catch (e) { console.warn(`Leaderboard: cannot get price for ${symbol}`); }
+        }
+        if (price && !isNaN(price)) {
+            total += holding.qty * price;
+        }
+    }
+    return total;
+}
+
 app.get('/api/leaderboard', authenticate, async (req, res) => {
     try {
         const db = await connectDb();
@@ -494,26 +522,25 @@ app.get('/api/leaderboard', authenticate, async (req, res) => {
         const users = await db.collection('users').find({}).toArray();
         const leaderboard = [];
         for (const user of users) {
-            const latestHistory = await db.collection('portfolio_history')
-                .find({ username: user.username })
-                .sort({ timestamp: -1 })
-                .limit(1)
-                .toArray();
-            let totalValue = user.portfolio?.cash || 0;
-            if (latestHistory.length > 0) totalValue = latestHistory[0].totalValue;
+            // Compute current total value using live prices (real-time)
+            const currentTotal = await computeCurrentPortfolioValue(user.portfolio || { cash: 100000, holdings: {} }, user.username);
+            // Get yesterday's value from portfolio_history (snapshot)
             const yesterday = new Date();
             yesterday.setDate(yesterday.getDate() - 1);
             const yesterdayStr = yesterday.toISOString().split('T')[0];
             const yesterdayHistory = await db.collection('portfolio_history')
                 .findOne({ username: user.username, timestamp: yesterdayStr });
-            const previousValue = yesterdayHistory ? yesterdayHistory.totalValue : totalValue;
-            const dayChange = totalValue - previousValue;
+            const previousValue = yesterdayHistory ? yesterdayHistory.totalValue : currentTotal;
+            const dayChange = currentTotal - previousValue;
             const dayChangePct = previousValue !== 0 ? (dayChange / previousValue) * 100 : 0;
-            leaderboard.push({ username: user.username, totalValue, dayChange, dayChangePct });
+            leaderboard.push({ username: user.username, totalValue: currentTotal, dayChange, dayChangePct });
         }
         leaderboard.sort((a, b) => b.totalValue - a.totalValue);
         res.json({ leaderboard });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    } catch (err) {
+        console.error('Leaderboard error:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== USER LAYOUT ==========
@@ -693,6 +720,35 @@ app.get('/api/yahoo', async (req, res) => {
         }
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// ========== DAILY PORTFOLIO HISTORY UPDATE FOR ALL USERS ==========
+// Run every day at 23:59 UTC to snapshot all users' portfolios using current prices
+cron.schedule('59 23 * * *', async () => {
+    console.log('Running daily portfolio snapshot for all users...');
+    try {
+        const db = await connectDb();
+        if (!db) return;
+        const users = await db.collection('users').find({}).toArray();
+        const today = new Date().toISOString().split('T')[0];
+        let updated = 0;
+        for (const user of users) {
+            const portfolio = user.portfolio || { cash: 100000, holdings: {} };
+            const totalValue = await computeCurrentPortfolioValue(portfolio, user.username);
+            // Upsert today's snapshot
+            await db.collection('portfolio_history').updateOne(
+                { username: user.username, timestamp: today },
+                { $set: { totalValue, username: user.username, timestamp: today } },
+                { upsert: true }
+            );
+            updated++;
+        }
+        console.log(`Daily portfolio snapshot completed: ${updated} users updated.`);
+    } catch (err) {
+        console.error('Daily portfolio snapshot failed:', err);
+    }
+}, {
+    timezone: "UTC"
 });
 
 // ========== FINNHUB PROXY ==========
@@ -960,6 +1016,30 @@ app.get('/api/pairs/analysis', async (req, res) => {
             dataPoints: commonDates.length
         });
     } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ========== NEWS FARMER (Multi-level Sentiment) ==========
+const { predictStockDirection } = require('./newsFarmer');
+
+app.get('/api/news/farmer', authenticate, async (req, res) => {
+    const { symbol, days = 3 } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+    try {
+        const cacheKey = `news_farmer:${symbol}:${days}`;
+        const cached = await getCache(cacheKey);
+        if (cached) return res.json(cached);
+
+        const result = await predictStockDirection(symbol, parseInt(days));
+        if (result.success) {
+            await setCache(cacheKey, result, 7200); // cache 2 hours
+            res.json(result);
+        } else {
+            res.status(404).json(result);
+        }
+    } catch (err) {
+        console.error('News Farmer error:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });

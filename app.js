@@ -963,8 +963,12 @@ async function loadChartData(symbol, days) {
                 else if (typeof lineSeries.setVisible === 'function') lineSeries.setVisible(isLineMode);
             }
             chart.timeScale().fitContent();
-            const errorDiv = document.querySelector('#chart-container .chart-error');
-            if (errorDiv) errorDiv.remove();
+// Ensure price scale auto-adjusts to new data range (critical for mobile)
+if (chart) {
+    chart.priceScale('right').applyOptions({ autoScale: true });
+}
+const errorDiv = document.querySelector('#chart-container .chart-error');
+if (errorDiv) errorDiv.remove();
             updateIndicators(candles);
             try {
                 const forecastValues = await updateForecastPanel(candles);
@@ -1066,7 +1070,26 @@ function updateWatchlistRow(sym, data) {
         cells[4].className = `py-1.5 text-right align-middle font-bold ${cls}`;
     }
 }
-async function changeActiveSymbol(symbol) { currentSymbol = symbol; document.getElementById('stock-symbol').innerText = symbol; document.getElementById('trade-symbol').value = symbol; await loadQuote(symbol); let days = 30; if (currentInterval === '1D') days = 1; else if (currentInterval === '1W') days = 7; else if (currentInterval === '3M') days = 90; else days = 30; await loadChartData(symbol, days); updateTotalPreview(); }
+async function changeActiveSymbol(symbol) { 
+    currentSymbol = symbol; 
+    document.getElementById('stock-symbol').innerText = symbol; 
+    document.getElementById('trade-symbol').value = symbol; 
+    await loadQuote(symbol); 
+    let days = 30; 
+    if (currentInterval === '1D') days = 1; 
+    else if (currentInterval === '1W') days = 7; 
+    else if (currentInterval === '3M') days = 90; 
+    else days = 30; 
+    await loadChartData(symbol, days); 
+    // Force chart to resize and re‑fit on mobile
+    refreshChartSize();
+    // Explicitly reset price scale to auto (fixes mobile stuck range)
+    if (chart) {
+        chart.priceScale('right').applyOptions({ autoScale: true });
+        chart.timeScale().fitContent();
+    }
+    updateTotalPreview(); 
+}
 function changeInterval(interval) { currentInterval = interval; ['1D','1W','1M','3M'].forEach(btn => { const el = document.getElementById(`btn-${btn}`); if (el) el.className = btn === interval ? 'px-1.5 py-0.5 bg-bbAmber text-black rounded font-bold text-[10px]' : 'px-1.5 py-0.5 bg-[#111] hover:bg-neutral-800 rounded text-[10px]'; }); let days = 30; if (interval === '1D') days = 1; else if (interval === '1W') days = 7; else if (interval === '3M') days = 90; else days = 30; loadChartData(currentSymbol, days); }
 
 // Theme toggle
@@ -1570,6 +1593,7 @@ function reorderMobileLayout() {
     const portfolioPieChart = document.getElementById('portfolio-composition-container');
     const ai = document.querySelector('.ai-module');
     const news = document.querySelector('.news-module');
+    const newsFarmer = document.querySelector('.news-farmer-module');
 
     let mobileContainer = document.getElementById('mobile-portrait-container');
     if (!mobileContainer) {
@@ -1597,6 +1621,7 @@ function reorderMobileLayout() {
     if (portfolioPieChart && portfolioPieChart.parentNode !== mobileContainer) mobileContainer.appendChild(portfolioPieChart);
     if (ai && ai.parentNode !== mobileContainer) mobileContainer.appendChild(ai);
     if (news && news.parentNode !== mobileContainer) mobileContainer.appendChild(news);
+    if (newsFarmer && newsFarmer.parentNode !== mobileContainer) mobileContainer.appendChild(newsFarmer);
 
     const grid = document.getElementById('main-resizable-grid');
     if (grid) grid.style.display = 'none';
@@ -1653,6 +1678,7 @@ if (fundamentals && rightContent && fundamentals.parentNode !== rightContent) ri
             if (portfolioPieChart && rightContent && portfolioPieChart.parentNode !== rightContent) rightContent.insertBefore(portfolioPieChart, portfolioLineChart?.nextSibling || rightContent.firstChild);
             if (ai && rightContent) rightContent.insertBefore(ai, portfolioPieChart?.nextSibling || rightContent.firstChild);
             if (news && rightContent) rightContent.appendChild(news);
+            if (newsFarmer && rightContent && newsFarmer.parentNode !== rightContent) rightContent.appendChild(newsFarmer);
 
 
             mobileContainer.remove();
@@ -2072,6 +2098,69 @@ async function analyzePair() {
         resultDiv.innerHTML = `<span class="text-red-500">Network error: ${err.message}</span>`;
     }
 }
+
+// ============================================================
+// NEWS FARMER FRONTEND
+// ============================================================
+async function runNewsFarmer() {
+    const symbol = document.getElementById('nf-symbol').value.trim().toUpperCase();
+    const resultDiv = document.getElementById('news-farmer-result');
+    if (!symbol) {
+        resultDiv.innerHTML = '<div class="text-red-500">Please enter a symbol.</div>';
+        return;
+    }
+    resultDiv.innerHTML = '<div class="text-gray-400 text-center">🌾 Harvesting news & analyzing sentiment...</div>';
+    try {
+        const res = await fetch(`/api/news/farmer?symbol=${symbol}&days=3`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            resultDiv.innerHTML = `<div class="text-red-500">Error: ${data.error || 'Failed to analyze news'}</div>`;
+            return;
+        }
+        // Determine colour for direction
+        const directionClass = data.direction === 'UP' ? 'text-green-500' : (data.direction === 'DOWN' ? 'text-red-500' : 'text-yellow-500');
+        let factorsHtml = '';
+        for (const [level, info] of Object.entries(data.factorBreakdown)) {
+            let sentimentColor = 'text-gray-400';
+            if (info.sentiment > 0.1) sentimentColor = 'text-green-500';
+            else if (info.sentiment < -0.1) sentimentColor = 'text-red-500';
+            factorsHtml += `<div class="flex justify-between text-[9px] border-b border-[#282828]/30 py-0.5">
+                <span class="capitalize">${level}</span>
+                <div><span class="${sentimentColor}">${info.sentiment}</span> (weight: ${info.weight}, articles: ${info.articleCount})</div>
+            </div>`;
+        }
+        let topNewsHtml = '';
+        for (const art of data.topArticles) {
+            const sentClass = art.sentiment > 0 ? 'text-green-500' : (art.sentiment < 0 ? 'text-red-500' : 'text-gray-400');
+            topNewsHtml += `<div class="border-b border-[#282828]/20 py-1">
+                <div class="flex justify-between"><span class="font-bold text-bbCyan">${art.level}</span><span class="${sentClass}">${art.sentiment.toFixed(2)}</span></div>
+                <div class="text-[9px]"><a href="${art.url}" target="_blank" class="hover:underline">${escapeHtml(art.title.substring(0, 80))}${art.title.length > 80 ? '…' : ''}</a></div>
+                <div class="text-[8px] text-gray-500">${art.source} · ${new Date(art.publishedAt).toLocaleString()}</div>
+            </div>`;
+        }
+        resultDiv.innerHTML = `
+            <div class="bg-black/40 p-2 rounded">
+                <div class="flex justify-between items-center">
+                    <span class="font-bold text-bbAmber">${data.symbol}</span>
+                    <span class="text-lg font-mono ${directionClass} font-bold">${data.direction}</span>
+                </div>
+                <div class="grid grid-cols-2 gap-1 text-[9px] mt-1">
+                    <div>Probability UP:</div><div class="text-right font-mono">${data.probabilityUp}</div>
+                    <div>Confidence:</div><div class="text-right font-mono">${data.confidence}</div>
+                    <div>Overall Score:</div><div class="text-right font-mono">${data.overallScore}</div>
+                    <div>Articles analyzed:</div><div class="text-right">${data.articlesCount}</div>
+                </div>
+                <div class="mt-2"><div class="text-bbAmber text-[9px] font-bold">FACTOR BREAKDOWN</div>${factorsHtml}</div>
+                <div class="mt-2"><div class="text-bbAmber text-[9px] font-bold">TOP INFLUENTIAL NEWS</div>${topNewsHtml}</div>
+            </div>
+        `;
+    } catch (err) {
+        resultDiv.innerHTML = `<div class="text-red-500">Network error: ${err.message}</div>`;
+    }
+}
+
 // ============================================================
 // INITIALISE TERMINAL
 // ============================================================
@@ -2102,6 +2191,13 @@ async function initTerminal() {
     document.getElementById('analyze-pair-btn')?.addEventListener('click', analyzePair);
 document.getElementById('pair-symbol1')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') analyzePair(); });
 document.getElementById('pair-symbol2')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') analyzePair(); });
+document.getElementById('run-news-farmer')?.addEventListener('click', runNewsFarmer);
+// Pre-fill symbol with current chart symbol
+const nfSymbolInput = document.getElementById('nf-symbol');
+if (nfSymbolInput) {
+    nfSymbolInput.value = currentSymbol;
+    nfSymbolInput.addEventListener('change', () => {});
+}
     setTimeout(() => updateCorrelationMatrix(), 5000);
     setInterval(() => updateCorrelationMatrix(), 60000);
     setInterval(refreshRiskMetrics, 60000);
