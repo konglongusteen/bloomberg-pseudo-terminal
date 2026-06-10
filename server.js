@@ -1021,28 +1021,40 @@ app.get('/api/pairs/analysis', async (req, res) => {
 });
 
 // ========== NEWS FARMER (Multi-level Sentiment) ==========
-const { predictStockDirection } = require('./newsFarmer');
+let predictStockDirection = null;
+try {
+    const newsFarmerModule = require('./newsFarmer');
+    predictStockDirection = newsFarmerModule.predictStockDirection;
+    console.log('✅ News Farmer module loaded successfully');
+} catch (err) {
+    console.error('❌ Failed to load newsFarmer.js:', err.message);
+}
 
-app.get('/api/news/farmer', authenticate, async (req, res) => {
-    const { symbol, days = 3 } = req.query;
-    if (!symbol) return res.status(400).json({ error: 'Symbol required' });
-    try {
-        const cacheKey = `news_farmer:${symbol}:${days}`;
-        const cached = await getCache(cacheKey);
-        if (cached) return res.json(cached);
+if (predictStockDirection) {
+    app.get('/api/news/farmer', authenticate, async (req, res) => {
+        const { symbol, days = 3 } = req.query;
+        if (!symbol) return res.status(400).json({ error: 'Symbol required' });
+        try {
+            const cacheKey = `news_farmer:${symbol}:${days}`;
+            const cached = await getCache(cacheKey);
+            if (cached) return res.json(cached);
 
-        const result = await predictStockDirection(symbol, parseInt(days));
-        if (result.success) {
-            await setCache(cacheKey, result, 7200); // cache 2 hours
-            res.json(result);
-        } else {
-            res.status(404).json(result);
+            const result = await predictStockDirection(symbol, parseInt(days));
+            if (result.success) {
+                await setCache(cacheKey, result, 7200);
+                res.json(result);
+            } else {
+                res.status(404).json(result);
+            }
+        } catch (err) {
+            console.error('News Farmer error:', err);
+            res.status(500).json({ success: false, error: err.message });
         }
-    } catch (err) {
-        console.error('News Farmer error:', err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
+    });
+    console.log('✅ News Farmer route registered at /api/news/farmer');
+} else {
+    console.warn('⚠️ News Farmer route not registered – module missing');
+}
 
 // ========== STATIC FILES (MUST BE LAST) ==========
 app.use(express.static(__dirname));
